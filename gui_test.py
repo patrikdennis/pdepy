@@ -1,4 +1,5 @@
 import sys
+from math import hypot
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QMenu,
     QToolButton, QWidget, QVBoxLayout, QSizePolicy
@@ -8,6 +9,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas,
 import matplotlib.pyplot as plt
 
 class MainWindow(QMainWindow):
+    CLOSE_THRESHOLD = 0.5  # distance threshold in data coords to close polygon
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Empty Window with Navigation Bar")
@@ -42,16 +45,19 @@ class MainWindow(QMainWindow):
         self.container = QWidget()
         self.setCentralWidget(self.container)
         self.layout = QVBoxLayout(self.container)
+
+        # State
         self.canvas = None
         self.toolbar = None
+        self.poly_points = []
+        self.poly_artists = []
+        self.drawing = False  # whether polygon drawing is active
 
     def zoom_callback(self, event):
-        # Zoom on scroll event
         ax = event.inaxes
         if ax is None:
             return
         base_scale = 1.1
-        # determine scale factor
         scale_factor = base_scale if event.button == 'up' else 1/base_scale
         xdata, ydata = event.xdata, event.ydata
         xlim = ax.get_xlim()
@@ -65,44 +71,81 @@ class MainWindow(QMainWindow):
         self.canvas.draw_idle()
 
     def on_generate_mesh(self):
-        # Create matplotlib figure and axis if not already
         if self.canvas is None:
             fig, ax = plt.subplots()
-            # Draw axes through origin
             ax.axhline(0, color='black', linewidth=2)
             ax.axvline(0, color='black', linewidth=2)
-            # Equal aspect
             ax.set_aspect('equal', 'box')
+            ax.set_xlim(-10, 10)
+            ax.set_ylim(-10, 10)
 
-            # Embed canvas
+            # Embed canvas and toolbar
             self.canvas = FigureCanvas(fig)
             self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.canvas.updateGeometry()
-            # Connect scroll event for zoom
             fig.canvas.mpl_connect('scroll_event', self.zoom_callback)
+            fig.canvas.mpl_connect('button_press_event', self.on_click)
 
-            # Navigation toolbar
             self.toolbar = NavigationToolbar(self.canvas, self)
             self.toolbar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-            # Add to layout
             self.layout.addWidget(self.toolbar)
             self.layout.addWidget(self.canvas)
         else:
-            # Clear and redraw
             ax = self.canvas.figure.axes[0]
             ax.cla()
             ax.axhline(0, color='black', linewidth=2)
             ax.axvline(0, color='black', linewidth=2)
-            ax.grid(True, which='both', linestyle='--', linewidth=0.5)
             ax.set_aspect('equal', 'box')
+            ax.set_xlim(-10, 10)
+            ax.set_ylim(-10, 10)
+            self.poly_points.clear()
+            for artist in self.poly_artists:
+                artist.remove()
+            self.poly_artists.clear()
             self.canvas.draw()
-        print("Generated 2D coordinate system with matplotlib. Scroll to zoom, drag to pan.")
+        # Activate drawing mode
+        self.drawing = True
+        print("Generated coordinate axes. Scroll to zoom, drag to pan. Click to add polygon points.")
+
+    def on_click(self, event):
+        if not self.drawing:
+            return
+        ax = event.inaxes
+        if ax is None or event.button != 1:
+            return
+        x, y = event.xdata, event.ydata
+        # Close polygon if click near start and enough points
+        if len(self.poly_points) >= 3:
+            x0, y0 = self.poly_points[0]
+            if hypot(x - x0, y - y0) <= self.CLOSE_THRESHOLD:
+                # Append starting point, draw closed polygon, then exit drawing mode
+                self.poly_points.append((x0, y0))
+                self._draw_polygon(ax)
+                self.drawing = False
+                print("Polygon closed. Returning to view mode.")
+                return
+        # Add new vertex
+        self.poly_points.append((x, y))
+        self._draw_polygon(ax)
+
+    def _draw_polygon(self, ax):
+        # Remove old artists
+        for artist in self.poly_artists:
+            artist.remove()
+        self.poly_artists.clear()
+        xs, ys = zip(*self.poly_points)
+        # Scatter points
+        scatter = ax.scatter(xs, ys, c='blue')
+        self.poly_artists.append(scatter)
+        # Plot connecting lines
+        line, = ax.plot(xs, ys, linestyle='-', marker='o', color='blue')
+        self.poly_artists.append(line)
+        self.canvas.draw()
 
     def on_refine_mesh(self):
         print("Refine Mesh selected")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
