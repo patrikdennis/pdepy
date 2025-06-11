@@ -1,10 +1,9 @@
 import sys
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QMenu,
-    QToolButton, QWidget, QVBoxLayout
+    QToolButton, QWidget, QVBoxLayout, QSizePolicy
 )
 from PyQt6.QtGui import QAction, QFont
-from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
 
@@ -46,6 +45,25 @@ class MainWindow(QMainWindow):
         self.canvas = None
         self.toolbar = None
 
+    def zoom_callback(self, event):
+        # Zoom on scroll event
+        ax = event.inaxes
+        if ax is None:
+            return
+        base_scale = 1.2
+        # determine scale factor
+        scale_factor = base_scale if event.button == 'up' else 1/base_scale
+        xdata, ydata = event.xdata, event.ydata
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        new_width = (xlim[1] - xlim[0]) * scale_factor
+        new_height = (ylim[1] - ylim[0]) * scale_factor
+        relx = (xdata - xlim[0]) / (xlim[1] - xlim[0])
+        rely = (ydata - ylim[0]) / (ylim[1] - ylim[0])
+        ax.set_xlim([xdata - new_width * relx, xdata + new_width * (1-relx)])
+        ax.set_ylim([ydata - new_height * rely, ydata + new_height * (1-rely)])
+        self.canvas.draw_idle()
+
     def on_generate_mesh(self):
         # Create matplotlib figure and axis if not already
         if self.canvas is None:
@@ -55,12 +73,21 @@ class MainWindow(QMainWindow):
             ax.axvline(0, color='black', linewidth=2)
             # Grid
             ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-            # Set equal aspect
+            # Equal aspect
             ax.set_aspect('equal', 'box')
 
             # Embed canvas
             self.canvas = FigureCanvas(fig)
+            self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self.canvas.updateGeometry()
+            # Connect scroll event for zoom
+            fig.canvas.mpl_connect('scroll_event', self.zoom_callback)
+
+            # Navigation toolbar
             self.toolbar = NavigationToolbar(self.canvas, self)
+            self.toolbar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+            # Add to layout
             self.layout.addWidget(self.toolbar)
             self.layout.addWidget(self.canvas)
         else:
@@ -72,7 +99,7 @@ class MainWindow(QMainWindow):
             ax.grid(True, which='both', linestyle='--', linewidth=0.5)
             ax.set_aspect('equal', 'box')
             self.canvas.draw()
-        print("Generated 2D coordinate system with matplotlib. Use toolbar to zoom/pan.")
+        print("Generated 2D coordinate system with matplotlib. Scroll to zoom, drag to pan.")
 
     def on_refine_mesh(self):
         print("Refine Mesh selected")
