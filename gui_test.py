@@ -71,8 +71,6 @@ class MainWindow(QMainWindow):
             # Draw axes through origin
             ax.axhline(0, color='black', linewidth=2)
             ax.axvline(0, color='black', linewidth=2)
-            # Grid
-            ax.grid(True, which='both', linestyle='--', linewidth=0.5)
             # Equal aspect
             ax.set_aspect('equal', 'box')
 
