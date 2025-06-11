@@ -53,17 +53,18 @@ class MainWindow(QMainWindow):
         mesh_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         nav_bar.addWidget(mesh_button)
 
-        # Central container
+        # Central widget
         self.container = QWidget()
         self.setCentralWidget(self.container)
         self.layout = QVBoxLayout(self.container)
 
-        # State
+        # Drawing state
         self.canvas = None
         self.toolbar = None
-        self.poly_points = []
-        self.poly_artists = []
-        self.drawing = False  # whether polygon drawing is active
+        self.poly_points = []         # current polygon vertices
+        self.poly_artists = []        # artists for current polygon
+        self.permanent_artists = []   # artists for closed polygons
+        self.drawing = False          # whether drawing mode is active
 
     def zoom_callback(self, event):
         ax = event.inaxes
@@ -72,27 +73,23 @@ class MainWindow(QMainWindow):
         base_scale = 1.1
         scale_factor = base_scale if event.button == 'up' else 1/base_scale
         xdata, ydata = event.xdata, event.ydata
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
+        xlim = ax.get_xlim(); ylim = ax.get_ylim()
         new_width = (xlim[1] - xlim[0]) * scale_factor
         new_height = (ylim[1] - ylim[0]) * scale_factor
-        relx = (xdata - xlim[0]) / (xlim[1] - xlim[0])
-        rely = (ydata - ylim[0]) / (ylim[1] - ylim[0])
-        ax.set_xlim([xdata - new_width * relx, xdata + new_width * (1-relx)])
-        ax.set_ylim([ydata - new_height * rely, ydata + new_height * (1-rely)])
+        relx = (xdata - xlim[0])/(xlim[1] - xlim[0])
+        rely = (ydata - ylim[0])/(ylim[1] - ylim[0])
+        ax.set_xlim([xdata - new_width*relx, xdata + new_width*(1-relx)])
+        ax.set_ylim([ydata - new_height*rely, ydata + new_height*(1-rely)])
         self.canvas.draw_idle()
 
     def on_generate_mesh(self):
-        # Create axes if needed
         if self.canvas is None:
             fig, ax = plt.subplots()
             ax.axhline(0, color='black', linewidth=2)
             ax.axvline(0, color='black', linewidth=2)
             ax.set_aspect('equal', 'box')
-            ax.set_xlim(-10, 10)
-            ax.set_ylim(-10, 10)
+            ax.set_xlim(-10, 10); ax.set_ylim(-10, 10)
 
-            # Embed canvas and toolbar
             self.canvas = FigureCanvas(fig)
             self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.canvas.updateGeometry()
@@ -104,60 +101,52 @@ class MainWindow(QMainWindow):
             self.layout.addWidget(self.toolbar)
             self.layout.addWidget(self.canvas)
         else:
-            # Reset axes
             ax = self.canvas.figure.axes[0]
-            ax.cla()
-            ax.axhline(0, color='black', linewidth=2)
+            ax.cla(); ax.axhline(0, color='black', linewidth=2)
             ax.axvline(0, color='black', linewidth=2)
-            ax.set_aspect('equal', 'box')
-            ax.set_xlim(-10, 10)
-            ax.set_ylim(-10, 10)
-            # Clear drawing state
+            ax.set_aspect('equal', 'box'); ax.set_xlim(-10, 10); ax.set_ylim(-10, 10)
+            # clear current drawing
             self.poly_points.clear()
             for artist in self.poly_artists:
                 artist.remove()
             self.poly_artists.clear()
             self.canvas.draw()
         self.drawing = True
-        print("Generated coordinate axes. Scroll to zoom, drag to pan. Ready to draw or refine.")
+        print("Mesh generated. Drawing mode ready.")
 
     def on_draw_polygon(self):
-        # Start polygon drawing mode
         if self.canvas is None:
             self.on_generate_mesh()
-        else:
-            # Clear any previous polygon
-            ax = self.canvas.figure.axes[0]
-            for artist in self.poly_artists:
-                artist.remove()
-            self.poly_artists.clear()
-            self.poly_points.clear()
-            self.canvas.draw()
+        # start new polygon: clear current points only
+        self.poly_points.clear()
+        self.poly_artists.clear()
         self.drawing = True
-        print("Polygon draw mode activated. Click to add points. Click near start to close.")
+        print("Polygon draw mode: start clicking vertices.")
 
     def on_click(self, event):
-        if not self.drawing:
-            return
+        if not self.drawing: return
         ax = event.inaxes
-        if ax is None or event.button != 1:
-            return
+        if ax is None or event.button != 1: return
         x, y = event.xdata, event.ydata
-        # Close polygon if near start and enough points
+        # close if near first and enough points
         if len(self.poly_points) >= 3:
             x0, y0 = self.poly_points[0]
-            if hypot(x - x0, y - y0) <= self.CLOSE_THRESHOLD:
+            if hypot(x-x0, y-y0) <= self.CLOSE_THRESHOLD:
                 self.poly_points.append((x0, y0))
                 self._draw_polygon(ax)
+                # finalize polygon
+                self.permanent_artists.extend(self.poly_artists)
+                self.poly_artists.clear()
+                self.poly_points.clear()
                 self.drawing = False
-                print("Polygon closed. Returning to view mode.")
+                print("Polygon closed.")
                 return
-        # Add vertex
+        # add new point
         self.poly_points.append((x, y))
         self._draw_polygon(ax)
 
     def _draw_polygon(self, ax):
-        # Remove old artists
+        # remove only current artists
         for artist in self.poly_artists:
             artist.remove()
         self.poly_artists.clear()
