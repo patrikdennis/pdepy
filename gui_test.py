@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
         ax = event.inaxes
         if ax is None:
             return
-        base_scale = 1.2
+        base_scale = 1.1
         # determine scale factor
         scale_factor = base_scale if event.button == 'up' else 1/base_scale
         xdata, ydata = event.xdata, event.ydata
