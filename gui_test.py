@@ -1,22 +1,31 @@
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QToolBar, QMenu, QToolButton
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QFont
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PDE Toolbox")
+        self.setWindowTitle("Empty Window with Navigation Bar")
         # Make window larger
         self.resize(800, 600)
 
+        # Define a larger font
+        font = QFont()
+        font.setPointSize(14)
+
         # Create a navigation toolbar
         nav_bar = QToolBar("Navigation")
+        nav_bar.setFont(font)
+        # Optionally increase toolbar icon height
+        nav_bar.setIconSize(nav_bar.iconSize().expandedTo(nav_bar.iconSize()))
         self.addToolBar(nav_bar)
 
         # Create a 'Mesh' tool button with suboptions
         mesh_button = QToolButton(self)
         mesh_button.setText("Mesh")
+        mesh_button.setFont(font)
         mesh_menu = QMenu(self)
+        mesh_menu.setFont(font)
 
         # Suboptions
         generate_action = QAction("Generate Mesh", self)
