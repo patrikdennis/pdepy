@@ -51,12 +51,13 @@ Support 'outer' as polygon or circle, plus optional 'holes'."""
         self.holes = spec.get('holes', [])
 
         # Internal storage
-        self.points: np.ndarray = np.empty((0,2))
-        self.triangles: np.ndarray = np.empty((0,3), dtype=int)
+        self.points: np.ndarray = np.empty((0, 2))
+        self.triangles: np.ndarray = np.empty((0, 3), dtype=int)
 
     def _discretize_circle(self, center: Tuple[float,float], r: float, segments: int) -> np.ndarray:
         theta = np.linspace(0, 2*np.pi, segments, endpoint=False)
-        pts = np.vstack([center[0] + r*np.cos(theta), center[1] + r*np.sin(theta)]).T
+        pts = np.vstack([center[0] + r*np.cos(theta), 
+                         center[1] + r*np.sin(theta)]).T
         return pts
 
     def generate(self, max_area: float = None) -> Tuple[np.ndarray, np.ndarray]:
@@ -150,12 +151,13 @@ Support 'outer' as polygon or circle, plus optional 'holes'."""
         if ax is None:
             fig, ax = plt.subplots()
             own_fig = True
-        ax.triplot(self.points[:,0], self.points[:,1], self.triangles, **kwargs)
+        ax.triplot(self.points[:, 0], self.points[:,1], self.triangles, **kwargs)
         ax.set_aspect('equal')
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_title('Triangle-generated mesh')
         if show and own_fig:
+            plt.style.use('dark_background')
             plt.show()
 
     plot_mesh = plot
