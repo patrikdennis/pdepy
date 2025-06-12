@@ -52,6 +52,8 @@ class MainWindow(QMainWindow):
         self.mode = None
         self.dragging = False
         self.last_mouse = None
+        self.modify_vidx = None
+        self.context_event = None
 
     def on_generate_mesh(self):
         if not self.canvas:
@@ -125,12 +127,15 @@ class MainWindow(QMainWindow):
                         return
 
     def show_context_menu(self, event):
+        # Store event for modify reference
+        self.context_event = event
         menu = QMenu(self)
         move = QAction("Move", self); mod = QAction("Modify", self); dele = QAction("Delete", self)
         menu.addAction(move); menu.addAction(mod); menu.addAction(dele)
         move.triggered.connect(lambda: self.start_move(event))
         mod.triggered.connect(self.start_modify)
         dele.triggered.connect(self.start_delete)
+        # Show menu at cursor position
         menu.exec(QCursor.pos())
 
     def start_move(self, event):
@@ -139,8 +144,19 @@ class MainWindow(QMainWindow):
         print("Move mode activated.")
 
     def start_modify(self):
-        self.mode = 'modify'
-        print("Modify mode activated.")
+        # Determine which vertex to modify based on last right-click
+        if self.context_event and self.selected_idx is not None:
+            x0, y0 = self.context_event.xdata, self.context_event.ydata
+            points = self.polygons[self.selected_idx]['points']
+            # Find closest point
+            dists = [hypot(px - x0, py - y0) for px, py in points]
+            self.modify_vidx = dists.index(min(dists))
+            self.mode = 'modify'
+            self.dragging = True
+            self.last_mouse = (x0, y0)
+            print("Modify mode activated on vertex {}.".format(self.modify_vidx))
+        else:
+            print("Modify mode could not activate.")("Modify mode activated.")
 
     def start_delete(self):
         idx = self.selected_idx
@@ -182,8 +198,28 @@ class MainWindow(QMainWindow):
         self.canvas.draw()
 
     def on_motion(self, event):
-        if not self.dragging or self.mode != 'move' or self.selected_idx is None:
+        ax = self.canvas.figure.axes[0]
+        if not self.dragging or self.selected_idx is None:
             return
+        x, y = event.xdata, event.ydata
+        dx = x - self.last_mouse[0] if self.last_mouse else 0
+        dy = y - self.last_mouse[1] if self.last_mouse else 0
+        self.last_mouse = (x, y)
+        poly = self.polygons[self.selected_idx]
+        if self.mode == 'move':
+            # Move entire polygon
+            pts = [(px+dx, py+dy) for px, py in poly['points']]
+            poly['points'] = pts
+        elif self.mode == 'modify' and self.modify_vidx is not None:
+            # Move single vertex
+            pts = list(poly['points'])
+            px, py = pts[self.modify_vidx]
+            pts[self.modify_vidx] = (px+dx, py+dy)
+            poly['points'] = pts
+        else:
+            return
+        # Redraw after transform
+        self.redraw_polygons()
         ax = self.canvas.figure.axes[0]; x, y = event.xdata, event.ydata
         dx = x - self.last_mouse[0]; dy = y - self.last_mouse[1]
         self.last_mouse = (x, y)
@@ -193,6 +229,12 @@ class MainWindow(QMainWindow):
         self.redraw_polygons()
 
     def on_release(self, event):
+        if self.dragging:
+            self.dragging = False
+            self.mode = None
+            self.modify_vidx = None
+            self.last_mouse = None
+
         if self.dragging:
             self.dragging = False; self.mode = None; self.last_mouse = None
 
