@@ -7,13 +7,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QAction, QFont, QCursor
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
+plt.style.use("dark_background")
 
 class MainWindow(QMainWindow):
     CLOSE_THRESHOLD = 0.5  # threshold to detect proximity
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Empty Window with Navigation Bar")
+        self.setWindowTitle("PDE Toolbox")
         self.resize(800, 600)
 
         # Toolbar setup
@@ -87,7 +88,7 @@ class MainWindow(QMainWindow):
             fig.canvas.mpl_connect('button_press_event', self.on_click)
             fig.canvas.mpl_connect('motion_notify_event', self.on_motion)
             fig.canvas.mpl_connect('button_release_event', self.on_release)
-
+            fig.canvas.mpl_connect('scroll_event',    self.zoom_callback)
             nav = NavigationToolbar(self.canvas, self)
             self.layout.addWidget(nav)
             self.layout.addWidget(self.canvas)
@@ -122,7 +123,24 @@ class MainWindow(QMainWindow):
         self.selected_idx = None
         self.redraw_polygons()
         print("Polygon draw mode activated.")
-
+    
+    def zoom_callback(self, event):
+        ax = event.inaxes
+        if ax is None:
+            return
+        base_scale = 1.1  # tweak for faster/slower zoom
+        # determine scale factor: 'up' scroll means zoom in, otherwise zoom out
+        scale_factor = base_scale if event.button == 'up' else 1/base_scale
+        xdata, ydata = event.xdata, event.ydata
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        new_width = (xlim[1] - xlim[0]) * scale_factor
+        new_height = (ylim[1] - ylim[0]) * scale_factor
+        relx = (xdata - xlim[0]) / (xlim[1] - xlim[0])
+        rely = (ydata - ylim[0]) / (ylim[1] - ylim[0])
+        ax.set_xlim([xdata - new_width * relx, xdata + new_width * (1-relx)])
+        ax.set_ylim([ydata - new_height * rely, ydata + new_height * (1-rely)])
+        self.canvas.draw_idle()
 
     def on_refine_mesh(self):
         print("Refine Mesh selected")
@@ -144,6 +162,7 @@ class MainWindow(QMainWindow):
                 })
                 self.clear_current()
                 self.drawing = False
+                self.redraw_polygons()
                 print("Polygon closed.")
             else:
                 self.current_points.append((x, y))
@@ -250,8 +269,8 @@ class MainWindow(QMainWindow):
     def redraw_polygons(self):
         ax = self.canvas.figure.axes[0]
         ax.cla()
-        ax.axhline(0, color='black', linewidth=2)
-        ax.axvline(0, color='black', linewidth=2)
+        ax.axhline(0, color='white', linewidth=2)
+        ax.axvline(0, color='white', linewidth=2)
         ax.set_aspect('equal', 'box')
         ax.set_xlim(-10, 10)
         ax.set_ylim(-10, 10)
