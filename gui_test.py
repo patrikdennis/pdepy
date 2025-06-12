@@ -77,8 +77,8 @@ class MainWindow(QMainWindow):
     def on_generate_mesh(self):
         if not self.canvas:
             fig, ax = plt.subplots()
-            ax.axhline(0, color='black', linewidth=2)
-            ax.axvline(0, color='black', linewidth=2)
+            ax.axhline(0, color='white', linewidth=1)
+            ax.axvline(0, color='white', linewidth=1)
             ax.set_aspect('equal', 'box')
             ax.set_xlim(-10, 10)
             ax.set_ylim(-10, 10)
@@ -95,8 +95,8 @@ class MainWindow(QMainWindow):
 
         ax = self.canvas.figure.axes[0]
         ax.cla()
-        ax.axhline(0, color='black', linewidth=2)
-        ax.axvline(0, color='black', linewidth=2)
+        ax.axhline(0, color='white', linewidth=1)
+        ax.axvline(0, color='white', linewidth=1)
         ax.set_aspect('equal', 'box')
         ax.set_xlim(-10, 10)
         ax.set_ylim(-10, 10)
@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
         self.selected_idx = None
         self.redraw_polygons()
         print("Polygon draw mode activated.")
-    
+
     def zoom_callback(self, event):
         ax = event.inaxes
         if ax is None:
@@ -286,7 +286,16 @@ class MainWindow(QMainWindow):
     def on_motion(self, event):
         if not self.dragging or self.selected_idx is None:
             return
-        x, y = event.xdata, event.ydata
+        #x, y = event.xdata, event.ydata
+
+        ax = event.inaxes or self.canvas.figure.axes[0]
+        if event.xdata is None or event.ydata is None:
+            x, y = ax.transData.inverted().transform((event.x, event.y))
+        else:
+            x, y = event.xdata, event.ydata
+        if self.last_mouse is None:
+            self.last_mouse = (x, y)
+
         dx = x - self.last_mouse[0] if self.last_mouse else 0
         dy = y - self.last_mouse[1] if self.last_mouse else 0
         self.last_mouse = (x, y)
