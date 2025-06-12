@@ -41,6 +41,8 @@ class MainWindow(QMainWindow):
         draw_menu.setFont(font)
         poly_act = QAction("Polygon", self)
         draw_menu.addAction(poly_act)
+        circle_act = QAction("Cirlce", self)
+        draw_menu.addAction(circle_act)
 
         mesh_btn.setMenu(mesh_menu)
         mesh_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -50,6 +52,7 @@ class MainWindow(QMainWindow):
         gen_act.triggered.connect(self.on_generate_mesh)
         ref_act.triggered.connect(self.on_refine_mesh)
         poly_act.triggered.connect(self.on_draw_polygon)
+        #circle_act.triggered.connect(self.on_draw_circle)
 
         # Central widget
         self.container = QWidget()
@@ -62,6 +65,7 @@ class MainWindow(QMainWindow):
         self.current_points = []
         self.current_artists = []
         self.polygons = []  # list of dicts with 'points' and 'artists'
+        self.circles = []
         self.selected_idx = None
         self.mode = None  # 'move' or 'modify'
         self.dragging = False
@@ -118,6 +122,7 @@ class MainWindow(QMainWindow):
         self.selected_idx = None
         self.redraw_polygons()
         print("Polygon draw mode activated.")
+
 
     def on_refine_mesh(self):
         print("Refine Mesh selected")
