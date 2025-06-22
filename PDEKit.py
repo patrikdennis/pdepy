@@ -2,7 +2,8 @@ import sys
 from math import hypot, atan2, cos, sin
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QMenu,
-    QToolButton, QWidget, QVBoxLayout, QSizePolicy
+    QToolButton, QWidget, QVBoxLayout, QSizePolicy,
+    QDialog, QFormLayout, QLabel, QLineEdit, QDialogButtonBox
 )
 from PyQt6.QtGui import QAction, QFont
 from shapely.geometry import Polygon as ShapelyPoly, Point as ShapelyPoint
@@ -18,6 +19,62 @@ from matplotlib.patches import (
 )
 
 plt.style.use("dark_background")
+
+
+
+# --- Custom dialogs for combined input ---
+class EllipseDialog(QDialog):
+    def __init__(self, parent, xc, yc, rx, ry):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Ellipse")
+        layout = QFormLayout(self)
+        self.h_edit = QLineEdit(str(xc))
+        self.k_edit = QLineEdit(str(yc))
+        self.a_edit = QLineEdit(str(rx))
+        self.b_edit = QLineEdit(str(ry))
+        layout.addRow(QLabel("Center x-coordinate:"), self.h_edit)
+        layout.addRow(QLabel("Center y-coordinate:"), self.k_edit)
+        layout.addRow(QLabel("Semi-major axis a:"), self.a_edit)
+        layout.addRow(QLabel("Semi-minor axis b:"), self.b_edit)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                QDialogButtonBox.StandardButton.Cancel)
+
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def getValues(self):
+        return (float(self.h_edit.text()),
+                float(self.k_edit.text()),
+                float(self.a_edit.text()),
+                float(self.b_edit.text()))
+
+class RectangleDialog(QDialog):
+    def __init__(self, parent, x0, y0, x1, y1):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Rectangle")
+        layout = QFormLayout(self)
+        self.x1_edit = QLineEdit(str(x0))
+        self.y1_edit = QLineEdit(str(y0))
+        self.x2_edit = QLineEdit(str(x1))
+        self.y2_edit = QLineEdit(str(y1))
+        layout.addRow(QLabel("x1 (bottom-left x):"), self.x1_edit)
+        layout.addRow(QLabel("y1 (bottom-left y):"), self.y1_edit)
+        layout.addRow(QLabel("x2 (top-right x):"), self.x2_edit)
+        layout.addRow(QLabel("y2 (top-right y):"), self.y2_edit)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                QDialogButtonBox.StandardButton.Cancel)
+
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def getValues(self):
+        return (float(self.x1_edit.text()),
+                float(self.y1_edit.text()),
+                float(self.x2_edit.text()),
+                float(self.y2_edit.text()))
+
 
 class MainWindow(QMainWindow):
     CLOSE_THRESHOLD = 0.5  # tolerance for vertex/edge selection
@@ -106,14 +163,16 @@ class MainWindow(QMainWindow):
             fig.canvas.mpl_connect('button_release_event', self.on_release)
             fig.canvas.mpl_connect('scroll_event', self.zoom_callback)
 
-            nav = NavigationToolbar(self.canvas, self)
-            self.layout.addWidget(nav)
+            #nav = NavigationToolbar(self.canvas, self)
+            self.toolbar = NavigationToolbar(self.canvas, self)
+
+            self.layout.addWidget(self.toolbar)
             self.layout.addWidget(self.canvas)
 
         ax = self.canvas.figure.axes[0]
         ax.cla()
-        ax.axhline(0, color='white', linewidth=1)
-        ax.axvline(0, color='white', linewidth=1)
+        ax.axhline(0, color='white', linewidth=0.5)
+        ax.axvline(0, color='white', linewidth=0.5)
         ax.set_aspect('equal', 'box')
         ax.set_xlim(-10, 10)
         ax.set_ylim(-10, 10)
@@ -142,8 +201,13 @@ class MainWindow(QMainWindow):
         print("Refine Mesh selected.")
 
     def on_draw_polygon(self):
+        
+        if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
+            self.toolbar.pan()
+
         if not self.canvas:
             self.on_generate_canvas()
+            
         self.drawing = True
         self.draw_type = 'polygon'
         self.current_points.clear()
@@ -153,8 +217,13 @@ class MainWindow(QMainWindow):
         print("Polygon draw mode activated.")
 
     def on_draw_circle(self):
+        
+        if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
+            self.toolbar.pan()
+
         if not self.canvas:
             self.on_generate_canvas()
+            
         self.drawing = True
         self.draw_type = 'circle'
         self.circle_center = None
@@ -164,8 +233,13 @@ class MainWindow(QMainWindow):
         print("Circle draw mode activated.")
 
     def on_draw_rectangle(self):
+        
+        if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
+            self.toolbar.pan()
+
         if not self.canvas:
             self.on_generate_canvas()
+            
         self.drawing = True
         self.draw_type = 'rectangle'
         self.rect_start = None
@@ -194,6 +268,44 @@ class MainWindow(QMainWindow):
         if not ax:
             return
         x, y = event.xdata, event.ydata
+        
+        # ── double-click to edit ellipse or rectangle ──
+        if getattr(event, 'dblclick', False) and not self.drawing and event.button == 1:
+            for idx, patch in enumerate(self.shapes):
+                # edit ellipse/circle
+                if isinstance(patch, MplEllipse):
+                    xc, yc = patch.center
+                    rx, ry = patch.width/2, patch.height/2
+                    if ((x-xc)/rx)**2 + ((y-yc)/ry)**2 <= 1:
+                        dlg = EllipseDialog(self, xc, yc, rx, ry)
+                        if dlg.exec() == QDialog.DialogCode.Accepted:
+                            try:
+                                h, k, a, b = dlg.getValues()
+                                patch.center = (h, k)
+                                patch.width  = 2 * a
+                                patch.height = 2 * b
+                                self.redraw_shapes()
+                            except Exception as e:
+                                print(f"Invalid ellipse parameters: {e}")
+                        return
+
+                # edit rectangle
+                if isinstance(patch, MplRectangle):
+                    x0, y0 = patch.get_x(), patch.get_y()
+                    w,  h  = patch.get_width(), patch.get_height()
+                    if x0 <= x <= x0+w and y0 <= y <= y0+h:
+                        dlg = RectangleDialog(self, x0, y0, x0+w, y0+h)
+                        if dlg.exec() == QDialog.DialogCode.Accepted:
+                            try:
+                                x1, y1, x2, y2 = dlg.getValues()
+                                patch.set_x(min(x1, x2))
+                                patch.set_y(min(y1, y2))
+                                patch.set_width(abs(x2 - x1))
+                                patch.set_height(abs(y2 - y1))
+                                self.redraw_shapes()
+                            except Exception as e:
+                                print(f"Invalid rectangle parameters: {e}")
+                        return
 
         # Polygon drawing
         if self.drawing and self.draw_type == 'polygon' and event.button == 1:
