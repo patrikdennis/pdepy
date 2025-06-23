@@ -8,6 +8,7 @@ from PyQt6.QtGui import QAction, QFont, QCursor
 from shapely.geometry import Polygon as ShapelyPoly
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon as MplPolygon, Circle as MplCircle
 plt.style.use("dark_background")
 
 class MainWindow(QMainWindow):
@@ -33,8 +34,10 @@ class MainWindow(QMainWindow):
         mesh_menu.setFont(font)
 
         # Mesh actions
+        canvas_act = QAction("Start Canvas", self)
         gen_act = QAction("Generate Mesh", self)
         ref_act = QAction("Refine Mesh", self)
+        mesh_menu.addAction(canvas_act)
         mesh_menu.addAction(gen_act)
         mesh_menu.addAction(ref_act)
 
@@ -51,6 +54,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(mesh_btn)
 
         # Connect actions
+        canvas_act.triggered.connect(self.on_generate_canvas)
         gen_act.triggered.connect(self.on_generate_mesh)
         ref_act.triggered.connect(self.on_refine_mesh)
         poly_act.triggered.connect(self.on_draw_shape)
@@ -75,7 +79,7 @@ class MainWindow(QMainWindow):
         self.modify_vidx = None
         self.context_event = None
 
-    def on_generate_mesh(self):
+    def on_generate_canvas(self):
         if not self.canvas:
             fig, ax = plt.subplots()
             ax.axhline(0, color='white', linewidth=1)
@@ -116,9 +120,13 @@ class MainWindow(QMainWindow):
         self.canvas.draw()
         print("Mesh generated.")
 
+    def on_generate_mesh(self):
+        print("Generate mesh selected.")
+        
+        
     def on_draw_shape(self):
         if not self.canvas:
-            self.on_generate_mesh()
+            self.on_generate_canvas()
         self.drawing = True
         self.clear_current()
         self.selected_idx = None
@@ -127,7 +135,7 @@ class MainWindow(QMainWindow):
 
     # def on_draw_cirlcle(self):
     #     if not self.canvas:
-    #         self.on_generate_mesh()
+    #         self.on_generate_canvas()
     #     self.drawing = True
     #     self.clear_current()
     #     self.selected_idx = None
@@ -169,6 +177,7 @@ class MainWindow(QMainWindow):
                 self.current_points.append(self.current_points[0])
                 self.draw_current()
                 self.shapes.append({
+                    'type':   'polygon',
                     'points': list(self.current_points),
                     'artists': list(self.current_artists)
                 })
@@ -311,28 +320,105 @@ class MainWindow(QMainWindow):
                 pass
         self.current_artists.clear()
 
-    def redraw_shapes(self):
-        #ax = self.canvas.figure.axes[0]
-        #ax.cla()
 
+    def redraw_shapes(self):
         ax = self.canvas.figure.axes[0]
+        # 1) Clear the axes (but keep xmin/xmax if you want zoom state preserved)
         xlim, ylim = ax.get_xlim(), ax.get_ylim()
         ax.cla()
-        ax.axhline(0, color='white', linewidth=1)
-        ax.axvline(0, color='white', linewidth=1)
         ax.set_aspect('equal', 'box')
         ax.set_xlim(*xlim)
         ax.set_ylim(*ylim)
-        #ax.set_xlim(-10, 10)
-        #ax.set_ylim(-10, 10)
-        for idx, poly in enumerate(self.shapes):
-            pts = poly['points']
-            xs, ys = zip(*pts)
-            color = 'green' if idx == self.selected_idx else 'blue'
-            sc = ax.scatter(xs, ys, c=color)
-            ln, = ax.plot(xs, ys, marker='o', c=color)
-            poly['artists'] = [sc, ln]
+
+        # 2) Style parameters for finished shapes
+        EDGE_COLOR = 'white'
+        EDGE_WIDTH = 1
+        FILL_COLOR = 'cyan'
+        FILL_ALPHA = 0.3
+
+        # --- draw all finished shapes first ---
+        for patch in self.shapes:
+            patch.set_edgecolor(EDGE_COLOR)
+            patch.set_linewidth(EDGE_WIDTH)
+            patch.set_facecolor(FILL_COLOR)
+            patch.set_alpha(FILL_ALPHA)
+            patch.set_zorder(1)             # behind the in‐progress
+            ax.add_patch(patch)
+
+        # --- draw the in‐progress polygon / circle on top ---
+        if self.current_points:
+            xs, ys = zip(*self.current_points)
+            ax.plot(
+                xs, ys,
+                color=EDGE_COLOR,
+                linewidth=EDGE_WIDTH,
+                linestyle='-',
+                zorder=2
+            )
+            # draw the vertices
+            ax.scatter(
+                xs, ys,
+                s=EDGE_WIDTH * 20,            # tweak this multiplier to taste
+                facecolor=EDGE_COLOR,
+                edgecolor=EDGE_COLOR,
+                zorder=3
+            )
+
         self.canvas.draw()
+
+    # def redraw_shapes(self):
+    #     #ax = self.canvas.figure.axes[0]
+    #     #ax.cla()
+
+    #     ax = self.canvas.figure.axes[0]
+    #     xlim, ylim = ax.get_xlim(), ax.get_ylim()
+    #     ax.cla()
+    #     ax.axhline(0, color='white', linewidth=1)
+    #     ax.axvline(0, color='white', linewidth=1)
+    #     ax.set_aspect('equal', 'box')
+    #     ax.set_xlim(*xlim)
+    #     ax.set_ylim(*ylim)
+    #     #ax.set_xlim(-10, 10)
+    #     #ax.set_ylim(-10, 10)
+    #     # for idx, poly in enumerate(self.shapes):
+    #     #     pts = poly['points']
+    #     #     xs, ys = zip(*pts)
+    #     #     color = 'green' if idx == self.selected_idx else 'blue'
+    #     #     sc = ax.scatter(xs, ys, c=color)
+    #     #     ln, = ax.plot(xs, ys, marker='o', c=color)
+    #     #     poly['artists'] = [sc, ln]
+        
+    #     # Style parameters for finished shapes
+    #     EDGE_COLOR = 'white'
+    #     EDGE_WIDTH = 1
+    #     FILL_COLOR = 'cyan'
+    #     FILL_ALPHA = 0.3
+        
+    #     for shape in self.shapes:
+    #         # 1) build the right Patch
+    #         if shape.get('type') == 'polygon':
+    #             pts = shape['points']
+    #             patch = MplPolygon(pts,
+    #                             closed=True,
+    #                             facecolor='cyan',    # fill color
+    #                             alpha=0.3,           # transparency
+    #                             edgecolor='white',
+    #                             linewidth=1)
+    #         elif shape.get('type') == 'circle':
+    #             patch = MplCircle(shape['center'],
+    #                             shape['radius'],
+    #                             facecolor='cyan',
+    #                             alpha=0.3,
+    #                             edgecolor='white',
+    #                             linewidth=1)
+    #         else:
+    #             continue
+
+    #         # 2) add it to the axes and remember the artist
+    #         ax.add_patch(patch)
+    #         self.current_artists.append(patch)
+
+    #     self.canvas.draw()
 
     def polygons_overlap(pts, other_pts_list):
         """Return True if `pts` overlaps/intersects any polygon in other_pts_list."""
