@@ -149,14 +149,13 @@ class MainWindow(QMainWindow):
         # Initialize or clear the canvas
         if not self.canvas:
             fig, ax = plt.subplots()
-            ax.axhline(0, color='white', linewidth=1)
-            ax.axvline(0, color='white', linewidth=1)
+            ax.axhline(0, color='white', linewidth=0.5)
+            ax.axvline(0, color='white', linewidth=0.5)
             ax.set_aspect('equal', 'box')
-            ax.set_xlim(-10, 10)
-            ax.set_ylim(-10, 10)
+            ax.set_xlim(-1, 1)
+            ax.set_ylim(-1, 1)
 
             self.canvas = FigureCanvas(fig)
-            # Use PyQt6 QSizePolicy.Policy
             self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             fig.canvas.mpl_connect('button_press_event', self.on_click)
             fig.canvas.mpl_connect('motion_notify_event', self.on_motion)
@@ -174,8 +173,8 @@ class MainWindow(QMainWindow):
         ax.axhline(0, color='white', linewidth=0.5)
         ax.axvline(0, color='white', linewidth=0.5)
         ax.set_aspect('equal', 'box')
-        ax.set_xlim(-10, 10)
-        ax.set_ylim(-10, 10)
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
 
         # Clear stored shapes
         for patch in self.shapes:
@@ -412,8 +411,11 @@ class MainWindow(QMainWindow):
             self.current_artists.clear()
             ellipse = MplEllipse(xy=self.circle_center,
                                   width=abs(2*(x - x0)), height=abs(2*(y - y0)))
-            ellipse.set_edgecolor('white'); ellipse.set_linewidth(1)
-            ellipse.set_facecolor('cyan'); ellipse.set_alpha(0.3); ellipse.set_zorder(2)
+            ellipse.set_edgecolor('white') 
+            ellipse.set_linewidth(1)
+            ellipse.set_facecolor('cyan')
+            ellipse.set_alpha(0.3)
+            ellipse.set_zorder(2)
             ax.add_patch(ellipse)
             self.current_artists.append(ellipse)
             self.canvas.draw()
@@ -426,8 +428,11 @@ class MainWindow(QMainWindow):
                 art.remove()
             self.current_artists.clear()
             rect = MplRectangle((min(x0, x), min(y0, y)), abs(x - x0), abs(y - y0))
-            rect.set_edgecolor('white'); rect.set_linewidth(1)
-            rect.set_facecolor('cyan'); rect.set_alpha(0.3); rect.set_zorder(2)
+            rect.set_edgecolor('white')
+            rect.set_linewidth(1)
+            rect.set_facecolor('cyan')
+            rect.set_alpha(0.3)
+            rect.set_zorder(2)
             ax.add_patch(rect)
             self.current_artists.append(rect)
             self.canvas.draw()
@@ -541,8 +546,8 @@ class MainWindow(QMainWindow):
         ax = self.canvas.figure.axes[0]
         xlim, ylim = ax.get_xlim(), ax.get_ylim()
         ax.cla()
-        ax.axhline(0, color='white', linewidth=1)
-        ax.axvline(0, color='white', linewidth=1)
+        ax.axhline(0, color='white', linewidth=0.5)
+        ax.axvline(0, color='white', linewidth=0.5)
         ax.set_aspect('equal', 'box')
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
