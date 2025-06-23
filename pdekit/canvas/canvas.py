@@ -462,21 +462,38 @@ class Canvas(QWidget):
             opp_idx = (self.modify_corner + 2) % 4
             ox, oy = corners[opp_idx]
             nx, ny = x, y
-            patch.set_x(min(nx, ox))
-            patch.set_y(min(ny, oy))
-            patch.set_width(abs(nx - ox))
-            patch.set_height(abs(ny - oy))
-            self.redraw_shapes()
-            return
+            try:
+                patch.set_x(min(nx, ox))
+                patch.set_y(min(ny, oy))
+                patch.set_width(abs(nx - ox))
+                patch.set_height(abs(ny - oy))
+                self.redraw_shapes()
+                return
+            except TypeError:
+                pass
 
         if not getattr(self, 'dragging', False) or self.selected_idx is None:
             return
         # current mouse in pixel coords
+        # xpix, ypix = event.x, event.y
+        # inv = self.ax.transData.inverted()
+        # x0, y0 = inv.transform(self.last_mouse)
+        # x1, y1 = inv.transform((xpix, ypix))
+        # dx, dy = x1 - x0, y1 - y0
+        
+        # Handle move/modify existing shapes
+        # Handle move/modify existing shapes
         xpix, ypix = event.x, event.y
         inv = self.ax.transData.inverted()
-        x0, y0 = inv.transform(self.last_mouse)
-        x1, y1 = inv.transform((xpix, ypix))
+        # Safely transform last_mouse and current mouse to data coords
+        try:
+            x0, y0 = inv.transform([self.last_mouse])[0]
+            x1, y1 = inv.transform([(xpix, ypix)])[0]
+        except Exception:
+            # if transform fails (e.g., outside bounds), skip updating this event
+            return
         dx, dy = x1 - x0, y1 - y0
+        patch = self.shapes[self.selected_idx]
         
         #dx = x - self.last_mouse[0]
         #dy = y - self.last_mouse[1]
