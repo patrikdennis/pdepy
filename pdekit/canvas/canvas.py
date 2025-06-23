@@ -294,9 +294,6 @@ class Canvas(QWidget):
         # Select/move/modify existing shapes
         if not self.drawing and event.button == 1:
             
-            #if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
-            #    self.toolbar.pan()
-            
             # polygon editing
             for idx, patch in enumerate(self.shapes):
                 if isinstance(patch, MplPolygon):
@@ -330,19 +327,22 @@ class Canvas(QWidget):
                 if isinstance(patch, MplEllipse):
                     xc, yc = patch.center
                     rx, ry = patch.width / 2, patch.height / 2
+                    
                     # boundary: nearest point
                     angle = atan2(y - yc, x - xc)
                     bx = xc + rx * cos(angle)
                     by = yc + ry * sin(angle)
-                    #if hypot(x - bx, y - by) <= self.CLOSE_THRESHOLD:
+                    
                     if self._is_close_pixel(bx, by, event):
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
                             self.toolbar.pan()
+                            
                         # modify ellipse boundary
                         self.selected_idx = idx
                         self.mode = 'modify_ellipse'
                         self.dragging = True
                         return
+                    
                     # interior: move ellipse
                     if rx and ry and ((x - xc)/rx)**2 + ((y - yc)/ry)**2 <= 1:
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
@@ -355,12 +355,11 @@ class Canvas(QWidget):
                     
                 # rectangle editing
                 if isinstance(patch, MplRectangle):
+                    
                     x0, y0 = patch.get_x(), patch.get_y()
                     w, h = patch.get_width(), patch.get_height()
                     corners = [(x0, y0), (x0 + w, y0), (x0 + w, y0 + h), (x0, y0 + h)]
-                    #dists = [hypot(cx - x, cy - y) for cx, cy in corners]
                     pixel_dists = [self._pixel_dist(cx, cy, event) for cx, cy in corners]
-                    #if min(dists) <= self.CLOSE_THRESHOLD:
                     if min(pixel_dists) < self.CLOSE_PIXEL_THRESHOLD:
                         
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
@@ -372,6 +371,7 @@ class Canvas(QWidget):
                         self.mode = 'modify_rect'
                         self.dragging = True
                         return
+                    
                     # move rectangle
                     if x0 <= x <= x0 + w and y0 <= y <= y0 + h:
                         
@@ -390,9 +390,12 @@ class Canvas(QWidget):
 
         # preview circle
         if self.drawing and self.draw_type == 'circle' and self.circle_center:
+            
             x0, y0 = self.circle_center
+            
             for art in self.current_artists:
                 art.remove()
+                
             self.current_artists.clear()
             ellipse = MplEllipse(xy=self.circle_center,
                                   width=abs(2*(x - x0)), 
@@ -409,9 +412,12 @@ class Canvas(QWidget):
 
         # preview rectangle
         if self.drawing and self.draw_type == 'rectangle' and self.rect_start:
+            
             x0, y0 = self.rect_start
+            
             for art in self.current_artists:
                 art.remove()
+                
             self.current_artists.clear()
             rect = MplRectangle((min(x0, x), min(y0, y)), abs(x - x0), abs(y - y0))
             rect.set_edgecolor('white')
@@ -426,6 +432,7 @@ class Canvas(QWidget):
 
         # modify ellipse boundary
         if self.mode == 'modify_ellipse' and self.selected_idx is not None:
+            
             patch = self.shapes[self.selected_idx]
             xc, yc = patch.center
             # update radii based on cursor
@@ -455,6 +462,7 @@ class Canvas(QWidget):
         # moving or modifying existing shapes
         if not self.dragging or self.selected_idx is None:
             return
+        
         dx = x - self.last_mouse[0]
         dy = y - self.last_mouse[1]
         self.last_mouse = (x, y)
@@ -501,12 +509,15 @@ class Canvas(QWidget):
 
         # finalize rectangle
         if self.drawing and self.draw_type == 'rectangle' and self.rect_start:
+            
             x0, y0 = self.rect_start
             x1, y1 = event.xdata, event.ydata
             rect = MplRectangle((min(x0, x1), min(y0, y1)), abs(x1 - x0), abs(y1 - y0))
             self.shapes.append(rect)
+            
             for art in self.current_artists:
                 art.remove()
+                
             self.current_artists.clear()
             self.rect_start = None
             self.drawing = False
@@ -517,6 +528,7 @@ class Canvas(QWidget):
 
         # end drag
         if self.dragging:
+            
             self.dragging = False
             self.mode = None
             self.modify_vidx = None
@@ -524,9 +536,11 @@ class Canvas(QWidget):
             self.last_mouse = None
         
     def zoom_callback(self, event):
+        
         ax = event.inaxes
         if not ax:
             return
+        
         base_scale = 1.1 if event.button == 'up' else 1/1.1
         xdata, ydata = event.xdata, event.ydata
         xlim, ylim = ax.get_xlim(), ax.get_ylim()
