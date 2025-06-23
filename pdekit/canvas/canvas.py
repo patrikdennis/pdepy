@@ -213,13 +213,15 @@ class Canvas(QWidget):
         ax = event.inaxes
         if not ax:
             return
+        
         x, y = event.xdata, event.ydata
+        xpix, ypix = event.x, event.y
+        
+        if not self.shapes and (x is None or y is None):
+            return
         
         # ── double-click to edit ellipse or rectangle ──
         if getattr(event, 'dblclick', False) and not self.drawing and event.button == 1:
-            
-            #if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
-            #    self.toolbar.pan()
                 
             for idx, patch in enumerate(self.shapes):
                 # edit ellipse/circle
@@ -311,7 +313,7 @@ class Canvas(QWidget):
                         self.modify_vidx = pixel_dists.index(min(pixel_dists))
                         self.mode = 'modify_poly'
                         self.dragging = True
-                        self.last_mouse = (x, y)
+                        self.last_mouse = (xpix, ypix)
                         return
                     # move polygon
                     if ShapelyPoly(patch.get_xy()).contains(ShapelyPoint(x, y)):
@@ -320,7 +322,7 @@ class Canvas(QWidget):
                         self.selected_idx = idx
                         self.mode = 'move'
                         self.dragging = True
-                        self.last_mouse = (x, y)
+                        self.last_mouse = (xpix, ypix)
                         return
                     
                 # ellipse editing
@@ -350,7 +352,7 @@ class Canvas(QWidget):
                         self.selected_idx = idx
                         self.mode = 'move'
                         self.dragging = True
-                        self.last_mouse = (x, y)
+                        self.last_mouse = (xpix, ypix)
                         return
                     
                 # rectangle editing
@@ -381,7 +383,7 @@ class Canvas(QWidget):
                         self.selected_idx = idx
                         self.mode = 'move'
                         self.dragging = True
-                        self.last_mouse = (x, y)
+                        self.last_mouse = (xpix, ypix)
                         return
 
     def on_motion(self, event):
@@ -429,15 +431,23 @@ class Canvas(QWidget):
             self.current_artists.append(rect)
             self.canvas.draw()
             return
-
+        
+        
         # modify ellipse boundary
         if self.mode == 'modify_ellipse' and self.selected_idx is not None:
             
             patch = self.shapes[self.selected_idx]
+            #xc, yc = patch.center
+            
+            xpix, ypix = event.x, event.y
+            inv = self.ax.transData.inverted()
+            xdata, ydata = inv.transform((xpix, ypix))
+            # original center
             xc, yc = patch.center
+
             # update radii based on cursor
-            rx = abs(x - xc)
-            ry = abs(y - yc)
+            rx = abs(xdata - xc)
+            ry = abs(ydata - yc)
             patch.width = 2 * rx
             patch.height = 2 * ry
             self.redraw_shapes()
@@ -459,13 +469,18 @@ class Canvas(QWidget):
             self.redraw_shapes()
             return
 
-        # moving or modifying existing shapes
-        if not self.dragging or self.selected_idx is None:
+        if not getattr(self, 'dragging', False) or self.selected_idx is None:
             return
+        # current mouse in pixel coords
+        xpix, ypix = event.x, event.y
+        inv = self.ax.transData.inverted()
+        x0, y0 = inv.transform(self.last_mouse)
+        x1, y1 = inv.transform((xpix, ypix))
+        dx, dy = x1 - x0, y1 - y0
         
-        dx = x - self.last_mouse[0]
-        dy = y - self.last_mouse[1]
-        self.last_mouse = (x, y)
+        #dx = x - self.last_mouse[0]
+        #dy = y - self.last_mouse[1]
+        self.last_mouse = (xpix, ypix)
         patch = self.shapes[self.selected_idx]
         if self.mode == 'move':
             if isinstance(patch, MplPolygon):
