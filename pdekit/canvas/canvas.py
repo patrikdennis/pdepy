@@ -19,7 +19,7 @@ import numpy as np
 class Canvas(QWidget):
     
     #CLOSE_THRESHOLD = 0.5  # tolerance for vertex/edge selection
-    CLOSE_PIXEL_THRESHOLD = 5
+    CLOSE_PIXEL_THRESHOLD = 10
     
     def __init__(self, parent=None):
         self.fig, self.ax = plt.subplots()
@@ -372,6 +372,8 @@ class Canvas(QWidget):
                         self.modify_corner = pixel_dists.index(min(pixel_dists))
                         self.mode = 'modify_rect'
                         self.dragging = True
+                        opp_idx = (pixel_dists.index(min(pixel_dists)) + 2) % 4
+                        self.opp_corner = corners[opp_idx]
                         return
                     
                     # move rectangle
@@ -456,21 +458,25 @@ class Canvas(QWidget):
         # modify rectangle corner
         if self.mode == 'modify_rect' and self.selected_idx is not None:
             patch = self.shapes[self.selected_idx]
-            x0, y0 = patch.get_x(), patch.get_y()
-            w, h = patch.get_width(), patch.get_height()
-            corners = [(x0, y0), (x0 + w, y0), (x0 + w, y0 + h), (x0, y0 + h)]
-            opp_idx = (self.modify_corner + 2) % 4
-            ox, oy = corners[opp_idx]
-            nx, ny = x, y
-            try:
-                patch.set_x(min(nx, ox))
-                patch.set_y(min(ny, oy))
-                patch.set_width(abs(nx - ox))
-                patch.set_height(abs(ny - oy))
-                self.redraw_shapes()
+            
+            nx, ny = event.xdata, event.ydata
+            if nx is None or ny is None:
                 return
-            except TypeError:
-                pass
+            
+            # fixed opposite corner in data coords
+            ox, oy = self.opp_corner
+            # compute new origin and size (flips automatically)
+            new_x = min(nx, ox)
+            new_y = min(ny, oy)
+            w = abs(nx - ox)
+            h = abs(ny - oy)
+            patch.set_x(new_x)
+            patch.set_y(new_y)
+            patch.set_width(w)
+            patch.set_height(h)
+            self.redraw_shapes()
+            # update last mouse position
+            self.last_mouse = (event.x, event.y)
 
         if not getattr(self, 'dragging', False) or self.selected_idx is None:
             return
