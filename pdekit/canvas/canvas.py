@@ -116,6 +116,26 @@ class Canvas(QWidget):
         self.circle_center = None
         self.rect_start = None
         self.canvas.draw()
+        
+    def delete_selected(self):
+        if self.selected_idx is not None:
+            self.shapes.pop(self.selected_idx)
+            self.selected_idx = None
+            self.redraw_shapes()
+            
+    def _highlight(self, idx):
+        """Mark a shape as selected and redraw."""
+        if idx is not None:
+            self.selected_idx = idx
+            self.redraw_shapes()      
+            
+    def _clear_highlight(self, idx):
+        """Clear any previous selection and redraw."""
+        if idx is not None:
+            # Only clear if it was actually selected
+            if self.selected_idx == idx:
+                self.selected_idx = None
+            self.redraw_shapes()
 
     def start_polygon_mode(self):
         
@@ -198,18 +218,42 @@ class Canvas(QWidget):
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
 
-        for patch in self.shapes:
-            patch.set_edgecolor('white'); patch.set_linewidth(1)
-            patch.set_facecolor('cyan'); patch.set_alpha(0.3)
-            patch.set_zorder(1)
+        # for patch in self.shapes:
+        #     patch.set_edgecolor('white'); patch.set_linewidth(1)
+        #     patch.set_facecolor('cyan'); patch.set_alpha(0.3)
+        #     patch.set_zorder(1)
+        #     ax.add_patch(patch)
+        #     if isinstance(patch, MplPolygon):
+        #         verts = patch.get_xy()[:-1]
+        #         xs, ys = zip(*verts)
+        #         ax.scatter(xs, ys, s=10, facecolor='white', edgecolor='white', zorder=2)
+        # self.canvas.draw()
+        
+        for i, patch in enumerate(self.shapes):
+            if i == self.selected_idx:
+                # highlighted style
+                patch.set_edgecolor('red')
+                patch.set_linewidth(1)
+                patch.set_alpha(0.4)
+                patch.set_zorder(2)
+            else:
+                # normal/unhighlighted style
+                patch.set_edgecolor('white')
+                patch.set_linewidth(1)
+                patch.set_facecolor('cyan')
+                patch.set_alpha(0.3)
+                patch.set_zorder(1)
+    
             ax.add_patch(patch)
             if isinstance(patch, MplPolygon):
-                verts = patch.get_xy()[:-1]
-                xs, ys = zip(*verts)
+                xs, ys = zip(*patch.get_xy()[:-1])
                 ax.scatter(xs, ys, s=10, facecolor='white', edgecolor='white', zorder=2)
+
         self.canvas.draw()
 
     def on_click(self, event):
+        
+        prev_idx  = self.selected_idx
         ax = event.inaxes
         if not ax:
             return
@@ -298,6 +342,7 @@ class Canvas(QWidget):
             
             # polygon editing
             for idx, patch in enumerate(self.shapes):
+                hit = False
                 if isinstance(patch, MplPolygon):
                     verts = patch.get_xy()[:-1]
                     #dists = [hypot(px - x, py - y) for px, py in verts]
@@ -319,11 +364,12 @@ class Canvas(QWidget):
                     if ShapelyPoly(patch.get_xy()).contains(ShapelyPoint(x, y)):
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
                             self.toolbar.pan()
-                        self.selected_idx = idx
+                        #self.selected_idx = idx
                         self.mode = 'move'
                         self.dragging = True
+                        hit = True
                         self.last_mouse = (xpix, ypix)
-                        return
+                        #return
                     
                 # ellipse editing
                 if isinstance(patch, MplEllipse):
@@ -340,7 +386,7 @@ class Canvas(QWidget):
                             self.toolbar.pan()
                             
                         # modify ellipse boundary
-                        self.selected_idx = idx
+                        #self.selected_idx = idx
                         self.mode = 'modify_ellipse'
                         self.dragging = True
                         return
@@ -349,11 +395,12 @@ class Canvas(QWidget):
                     if rx and ry and ((x - xc)/rx)**2 + ((y - yc)/ry)**2 <= 1:
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
                             self.toolbar.pan()
-                        self.selected_idx = idx
+                        #self.selected_idx = idx
                         self.mode = 'move'
                         self.dragging = True
+                        hit = True
                         self.last_mouse = (xpix, ypix)
-                        return
+                        #return
                     
                 # rectangle editing
                 if isinstance(patch, MplRectangle):
@@ -368,7 +415,7 @@ class Canvas(QWidget):
                             self.toolbar.pan()
                             
                         # modify rectangle corner
-                        self.selected_idx = idx
+                        #self.selected_idx = idx
                         self.modify_corner = pixel_dists.index(min(pixel_dists))
                         self.mode = 'modify_rect'
                         self.dragging = True
@@ -382,11 +429,19 @@ class Canvas(QWidget):
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
                             self.toolbar.pan()
                             
-                        self.selected_idx = idx
+                        #self.selected_idx = idx
                         self.mode = 'move'
                         self.dragging = True
+                        hit = True
                         self.last_mouse = (xpix, ypix)
-                        return
+                        #return
+                if hit:
+                    self._clear_highlight(prev_idx)
+                    self.selected_idx = idx 
+                    self._highlight(idx)
+                    return
+            self._clear_highlight(prev_idx)
+                    
 
     def on_motion(self, event):
         ax = event.inaxes or self.canvas.figure.axes[0]
