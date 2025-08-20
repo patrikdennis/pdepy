@@ -24,15 +24,11 @@ import re  # === ADDED
 
 class Canvas(QWidget):
     
-    #CLOSE_THRESHOLD = 0.5  # tolerance for vertex/edge selection
     CLOSE_PIXEL_THRESHOLD = 10
     
     def __init__(self, parent=None):
         self.fig, self.ax = plt.subplots()
-        #super().__init__(self.fig)
         super().__init__(parent)
-        
-        #self.setParent(parent)
 
         # Create matplotlib Figure and Axes
         fig, ax = plt.subplots()
@@ -277,8 +273,22 @@ class Canvas(QWidget):
                 xs, ys = zip(*patch.get_xy()[:-1])
                 ax.scatter(xs, ys, s=10, facecolor='white', edgecolor='white', zorder=2)
 
-            # === ADDED: re-place tag labels for every shape
+            # re-place tag labels for every shape
             self._place_tag_text_for_patch_if_tagged(patch)
+            
+            # keep boolean-result patches vesting up
+            if isinstance(patch, PathPatch):
+                try:
+                    patch.set_fillrule('evenodd')
+                    patch.set_joinstyle('round')
+                    patch.set_capstyle('butt')
+                    patch.set_snap(False)
+                    patch.set_antialiased(True)
+                    # also make sure the path still disables simplify
+                    patch.get_path().should_simplify = False
+                except Exception:
+                    pass
+
 
         self.canvas.draw()
 
@@ -618,11 +628,17 @@ class Canvas(QWidget):
                     # update the path to match new geometry
                     if isinstance(geom2, ShapelyPoly):
                         new_path = self._polygon_to_path(geom2)
+                        new_path.should_simplify = False          
                         patch.set_path(new_path)
                         try:
                             patch.set_fillrule('evenodd')
+                            patch.set_joinstyle('round')
+                            patch.set_capstyle('butt')
+                            patch.set_snap(False)
+                            patch.set_antialiased(True)
                         except Exception:
                             pass
+                        
         elif self.mode == 'modify_poly':
             pts = patch.get_xy()
             vid = self.modify_vidx
@@ -717,9 +733,7 @@ class Canvas(QWidget):
             self.ax.plot(xs, ys, '-k')
         self.draw()
 
-    # ============================
-    # === ADDED: Tagging utils ===
-    # ============================
+# TAGGING UTILS
     def _auto_tag(self, patch):
         tag = f"P{self._tag_counter}"
         self._tag_counter += 1
@@ -731,47 +745,51 @@ class Canvas(QWidget):
         tag = self._shape_tags.get(id(patch))
         if tag:
             self._place_tag_text(tag, patch)
+            
 
     def _place_tag_text(self, tag, patch):
-        # prefer stored geometry for PathPatch results
         geom = self._shape_geom.get(id(patch), self._patch_to_geom(patch))
         if geom.is_empty:
             return
 
-        # keep label inside what you can actually see
         x0, x1 = self.ax.get_xlim()
         y0, y1 = self.ax.get_ylim()
         view = shapely_box(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
-        visible = geom.intersection(view)
-        if visible.is_empty:
-            # if it's totally outside, fall back to center of full geom (will be clipped)
-            target = geom.representative_point()
-        else:
-            target = visible.representative_point()
 
+        try:
+            visible = geom.intersection(view)
+        except Exception:
+            # repair attempt
+            try:
+                from shapely.validation import make_valid as _make_valid
+            except Exception:
+                try:
+                    from shapely import make_valid as _make_valid
+                except Exception:
+                    _make_valid = None
+            if _make_valid is not None:
+                try:
+                    visible = _make_valid(geom).intersection(view)
+                except Exception:
+                    visible = geom  # last resort
+            else:
+                visible = geom
+
+        target = (visible if not visible.is_empty else geom).representative_point()
         x, y = target.x, target.y
 
-        # recreate text artist on every call (after cla() or zoom)
         old = self._tag_text.get(tag)
         if old is not None:
-            try:
-                old.remove()
-            except Exception:
-                pass
+            try: old.remove()
+            except Exception: pass
 
-        txt = self.ax.text(
-            x, y, tag,
-            ha='center', va='center',
-            fontsize=10, color='white', zorder=50,
-            clip_on=True  # don't overflow outside axes
-        )
+        txt = self.ax.text(x, y, tag, ha='center', va='center',
+                        fontsize=10, color='white', zorder=50, clip_on=True)
         try:
             txt.set_path_effects([pe.withStroke(linewidth=2, foreground='black')])
         except Exception:
             pass
-
         self._tag_text[tag] = txt
-
 
 
     def _update_tag_position_for_patch(self, patch):
@@ -782,86 +800,141 @@ class Canvas(QWidget):
     def get_shape_tags(self):
         return list(self._tag_to_shape.keys())
 
-    # ============================================
-    # === ADDED: Conversions for set operations ===
-    # ============================================
+
     def _patch_to_geom(self, patch):
-        # if we have an exact geometry stored for this patch, use it
         stored = self._shape_geom.get(id(patch))
         if stored is not None:
             return stored
+
         if isinstance(patch, MplPolygon):
             coords = patch.get_xy()
             if len(coords) >= 3:
                 return ShapelyPoly(coords)
+
         elif isinstance(patch, MplRectangle):
             x0, y0 = patch.get_x(), patch.get_y()
             w, h = patch.get_width(), patch.get_height()
-            return shapely_box(x0, y0, x0+w, y0+h)
+            return shapely_box(x0, y0, x0 + w, y0 + h)
+
         elif isinstance(patch, MplEllipse):
             xc, yc = patch.center
             rx, ry = patch.width/2.0, patch.height/2.0
             circ = ShapelyPoint(xc, yc).buffer(1.0, resolution=256)
             return shapely_aff.scale(circ, rx, ry, origin=(xc, yc))
+
         elif isinstance(patch, PathPatch):
-            # convert the PathPatch to *data* coords before handing to shapely
+            # --- NEW: rebuild rings from path codes; drop NaNs from CLOSEPOLY
             path = patch.get_path()
-            transform = patch.get_transform()
-            ax = getattr(patch, 'axes', self.ax)
-            try:
-                verts_disp = path.transformed(transform).vertices
-                verts_data = ax.transData.inverted().transform(verts_disp)
-            except Exception:
-                verts_data = path.vertices
-            if len(verts_data) >= 3:
-                try:
-                    return ShapelyPoly(verts_data)
-                except Exception:
+            verts = path.vertices
+            codes = path.codes
+            if codes is None:
+                # defensive: if no codes, just ignore any non-finite rows
+                verts = verts[np.isfinite(verts).all(axis=1)]
+                if len(verts) >= 3:
+                    try:
+                        return ShapelyPoly(verts)
+                    except Exception:
+                        return ShapelyPoly()  # empty on failure
+                return ShapelyPoly()
+
+            rings, ring = [], []
+            for (x, y), c in zip(verts, codes):
+                if c == Path.MOVETO:
+                    if len(ring) >= 3:
+                        if ring[0] != ring[-1]:
+                            ring.append(ring[0])
+                        rings.append(ring)
+                    ring = []
+                    if np.isfinite(x) and np.isfinite(y):
+                        ring.append((x, y))
+                elif c == Path.LINETO:
+                    if np.isfinite(x) and np.isfinite(y):
+                        ring.append((x, y))
+                elif c == Path.CLOSEPOLY:
+                    # CLOSEPOLY row may be (nan, nan) — just close current ring
+                    if len(ring) >= 3:
+                        if ring[0] != ring[-1]:
+                            ring.append(ring[0])
+                        rings.append(ring)
+                    ring = []
+                else:
+                    # ignore other codes
                     pass
+
+            if len(rings) == 0:
+                return ShapelyPoly()
+
+            exterior = rings[0]
+            holes = [r for r in rings[1:] if len(r) >= 4]
+            try:
+                return ShapelyPoly(exterior, holes)
+            except Exception:
+                return ShapelyPoly()  # empty fallback
 
         return ShapelyPoly()
 
+    
     def _polygon_to_path(self, poly: ShapelyPoly):
-        def ring_to_vertices(ring):
+
+        def ring_to_path(ring):
             xs, ys = ring.xy
-            return list(zip(xs, ys))
+            vs = np.column_stack([xs, ys])
 
-        vertices = []
-        codes = []
+            # drop the duplicated endpoint if present
+            if len(vs) > 1 and np.allclose(vs[0], vs[-1]):
+                vs = vs[:-1]
 
-        ext = ring_to_vertices(poly.exterior)
-        if len(ext) > 0:
-            vertices.append(ext[0]); codes.append(Path.MOVETO)
-            for v in ext[1:]:
-                vertices.append(v); codes.append(Path.LINETO)
-            vertices.append(ext[0]); codes.append(Path.CLOSEPOLY)
+            # MOVETO + LINETOs
+            codes = np.full(len(vs), Path.LINETO, dtype=np.uint8)
+            codes[0] = Path.MOVETO
 
+            # CLOSEPOLY uses a dummy vertex --> prevents any stroke segment
+            vs = np.vstack([vs, [np.nan, np.nan]])
+            codes = np.append(codes, Path.CLOSEPOLY)
+
+            return Path(vs, codes)
+
+        # exterior + all holes as separate subpaths
+        paths = [ring_to_path(poly.exterior)]
         for interior in poly.interiors:
-            inn = ring_to_vertices(interior)
-            if len(inn) == 0:
-                continue
-            vertices.append(inn[0]); codes.append(Path.MOVETO)
-            for v in inn[1:]:
-                vertices.append(v); codes.append(Path.LINETO)
-            vertices.append(inn[0]); codes.append(Path.CLOSEPOLY)
+            paths.append(ring_to_path(interior))
 
-        return Path(vertices, codes)
+        compound = Path.make_compound_path(*paths)
+        compound.should_simplify = False
+        return compound
+
     
     def _geom_to_patches(self, geom):
         patches = []
         if geom.is_empty:
             return patches
 
+ 
         def make_patch(poly: ShapelyPoly):
             path = self._polygon_to_path(poly)
+            path.should_simplify = False
             p = PathPatch(path)
+
+            # keep holes as holes
             try:
                 p.set_fillrule('evenodd')
             except Exception:
                 pass
-            # --- NEW: remember the exact geometry for this patch
+
+            # SAFE STROKE SETTINGS --> prevent spokes
+            try:
+                p.set_joinstyle('round')
+                p.set_capstyle('butt')
+                # avoid snapping across subpaths
+                p.set_snap(False)
+                p.set_antialiased(True)
+            except Exception:
+                pass
+
+            # remember geometry for moving
             self._shape_geom[id(p)] = poly
             return p
+
 
         if isinstance(geom, ShapelyPoly):
             patches.append(make_patch(geom))
@@ -878,7 +951,7 @@ class Canvas(QWidget):
 
 
     # =================================
-    # === ADDED: Domain Calculator  ===
+    # ===   Domain Calculator  ===
     # =================================
     # hyphen is escaped; parentheses split to avoid "bad range" errors
     _token_re = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*|[()]|[+\-*!&])\s*")
@@ -991,9 +1064,9 @@ class Canvas(QWidget):
         self._tag_to_shape.clear()
         self._shape_geom.clear()
 
-        # --- add only the result, auto-tag if none provided ---
+        # add only the result --> auto-tag if none provided 
         new_tag = requested_tag.strip() or f"P{self._tag_counter}"
-        # If result has multiple disjoint pieces, suffix the same base tag
+        # If result has multiple disjoint pieces -->  suffix the same base tag
         if len(patches) == 1:
             p = patches[0]
             self.shapes.append(p)
