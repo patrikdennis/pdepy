@@ -39,6 +39,8 @@ class MainWindow(QMainWindow):
         canvas_act = QAction("Start Canvas", self)
         gen_act    = QAction("Generate Mesh", self)
         ref_act    = QAction("Refine Mesh", self)
+        delete_act = QAction("Delete", self)
+        domain_act = QAction("Domain", self)
         mesh_menu.addAction(canvas_act)
         mesh_menu.addAction(gen_act)
         mesh_menu.addAction(ref_act)
@@ -62,7 +64,12 @@ class MainWindow(QMainWindow):
         poly_act.triggered.connect(self.on_draw_polygon)
         circle_act.triggered.connect(self.on_draw_circle)
         rect_act.triggered.connect(self.on_draw_rectangle)
-
+        delete_act.triggered.connect(self.on_delete)
+        domain_act.triggered.connect(self.on_domain)
+    
+        toolbar.addAction(delete_act)
+        toolbar.addAction(domain_act)
+        
         self.canvas = None
         
         # Central layout
@@ -91,6 +98,14 @@ class MainWindow(QMainWindow):
         if not self.canvas:
             self.on_generate_canvas()
         self.canvas.start_rectangle_mode()
+        
+    def on_delete(self):
+        if self.canvas:
+            self.canvas.delete_selected()
+    
+    def on_domain(self):
+        if self.canvas:
+            self.canvas.domain_calculator()
 
     def on_generate_mesh(self):
         generate_mesh()
