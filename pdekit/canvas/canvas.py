@@ -1,18 +1,17 @@
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QMenu,
     QToolButton, QWidget, QVBoxLayout, QSizePolicy,
-    QDialog, QFormLayout, QLabel, QLineEdit, QDialogButtonBox, QMessageBox  # === ADDED: QMessageBox
+    QDialog, QFormLayout, QLabel, QLineEdit, QDialogButtonBox, QMessageBox
 )
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import (
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar
 )
-from matplotlib.patches import Polygon as MplPolygon, Ellipse as MplEllipse, Rectangle as MplRectangle, PathPatch  # === ADDED: PathPatch
+from matplotlib.patches import Polygon as MplPolygon, Ellipse as MplEllipse, Rectangle as MplRectangle, PathPatch
 from matplotlib.path import Path  # === ADDED
 from matplotlib import patheffects as pe 
 
-# === ADDED: more shapely helpers
 from shapely.geometry import Polygon as ShapelyPoly, Point as ShapelyPoint, box as shapely_box, MultiPolygon
 from shapely import affinity as shapely_aff
 
