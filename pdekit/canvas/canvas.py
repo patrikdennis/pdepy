@@ -80,6 +80,13 @@ class Canvas(QWidget):
         self._tag_text = {}      # tag -> Text artist
         self._shape_geom = {}  # id(patch) -> Shapely geometry (Polygon)
         
+        # Mesh overlay state 
+        self._mesh_artists = []             # list of artists used to draw the mesh
+        self._mesh_cache = None             # {"points": ndarray, "triangles": ndarray}
+        self._mesh_opts = {"quality": True, "max_area": None}  # last used meshing opts
+        self._auto_remesh = True            # remesh automatically on geometry changes if a mesh exists
+
+        
         # Event connections
         self.canvas.mpl_connect('button_press_event', self.on_click)
         self.canvas.mpl_connect('button_release_event', self.on_release)
@@ -153,6 +160,9 @@ class Canvas(QWidget):
         self._tag_to_shape.clear()
         self._tag_counter = 1
 
+        self._clear_mesh_layer()
+        self._mesh_cache = None
+        
         self.canvas.draw()
         
     def delete_selected(self):
@@ -173,6 +183,11 @@ class Canvas(QWidget):
             self._shape_geom.pop(id(patch), None)
 
             self.selected_idx = None
+            
+            # delete the existing mesh overlay --> geometry changed
+            self._clear_mesh_layer()
+            self._mesh_cache = None
+
             self.redraw_shapes()
             
     def _highlight(self, idx):
@@ -321,7 +336,7 @@ class Canvas(QWidget):
                 except Exception: pass
                 self.ax.add_collection(self._mesh_collection)
 
-
+        self._repaint_mesh_layer(alpha=0.35)
         self.canvas.draw()
 
     def on_click(self, event):
@@ -741,6 +756,19 @@ class Canvas(QWidget):
             self.modify_vidx = None
             self.modify_corner = None
             self.last_mouse = None
+            
+        # Auto-remesh if a mesh exists and the geometry may have changed
+        # (move/modify operations end on release). We reuse last used opts.
+        if getattr(self, "_auto_remesh", True) and self._mesh_cache is not None:
+            try:
+                self.generate_and_show_mesh(
+                    max_area=self._mesh_opts.get("max_area"),
+                    quality=self._mesh_opts.get("quality", True),
+                )
+            except Exception:
+                # Keep UI responsive even if meshing fails
+                pass
+
         
     def zoom_callback(self, event):
         
@@ -762,42 +790,38 @@ class Canvas(QWidget):
         for tag, patch in list(self._tag_to_shape.items()):
             self._place_tag_text(tag, patch)
 
-    # def show_mesh(self, mesh, *, color='orange', lw=0.8, z=30, clear_prev=True):
-    #     ax = self.canvas.figure.axes[0] if self.canvas else self.ax
 
-    #     # (optional) clear previous mesh lines
-    #     if clear_prev and hasattr(self, "_mesh_lines"):
-    #         for ln in self._mesh_lines:
-    #             try: ln.remove()
-    #             except Exception: pass
-    #         self._mesh_lines.clear()
-    #     else:
-    #         self._mesh_lines = []
-
-    #     # draw triangle edges
-    #     for tri in mesh.elements:
-    #         xs, ys = zip(*tri)  # tri is closed: [(x,y),(x,y),(x,y),(x,y)]
-    #         ln, = ax.plot(xs, ys, '-', linewidth=lw, color=color, zorder=z)
-    #         self._mesh_lines.append(ln)
-
-    #     self.canvas.draw_idle()
-    
-    def show_mesh(self, mesh, *, color=None, lw=None):
-        """Display/replace the mesh overlay and keep it across redraws."""
-        # detach old overlay if any
-        if self._mesh_collection is not None:
-            try: self._mesh_collection.remove()
-            except Exception: pass
-            self._mesh_collection = None
-
-        self._mesh = mesh
-        if color is not None: self._mesh_color = color
-        if lw    is not None: self._mesh_lw    = lw
-
-        self._mesh_collection = self._mesh_to_collection(mesh)
-        # add now; redraw_shapes() will re-add after every cla()
-        self.ax.add_collection(self._mesh_collection)
+    def show_mesh(self, mesh, faint=True):
+        """
+        Cache and draw a mesh overlay that survives redraws.
+        'mesh' is expected to have .points (N,2) and .triangles (M,3).
+        """
+        # Cache
+        self._mesh_cache = {
+            "points": np.asarray(mesh.points, dtype=float),
+            "triangles": np.asarray(mesh.triangles, dtype=int),
+        }
+        # Paint (semi-transparent by default)
+        self._repaint_mesh_layer(alpha=0.35 if faint else 0.9)
         self.canvas.draw_idle()
+
+
+    # def show_mesh(self, mesh, *, color=None, lw=None):
+    #     """Display/replace the mesh overlay and keep it across redraws."""
+    #     # detach old overlay if any
+    #     if self._mesh_collection is not None:
+    #         try: self._mesh_collection.remove()
+    #         except Exception: pass
+    #         self._mesh_collection = None
+
+    #     self._mesh = mesh
+    #     if color is not None: self._mesh_color = color
+    #     if lw    is not None: self._mesh_lw    = lw
+
+    #     self._mesh_collection = self._mesh_to_collection(mesh)
+    #     # add now; redraw_shapes() will re-add after every cla()
+    #     self.ax.add_collection(self._mesh_collection)
+    #     self.canvas.draw_idle()
 
 
 # TAGGING UTILS
@@ -1149,6 +1173,17 @@ class Canvas(QWidget):
         self._tag_counter += 1  # advance counter so next auto tag is fresh
         self.redraw_shapes()
         
+        # Auto-remesh after boolean ops if we already had a mesh layer
+        if getattr(self, "_auto_remesh", True) and self._mesh_cache is not None:
+            try:
+                self.generate_and_show_mesh(
+                    max_area=self._mesh_opts.get("max_area"),
+                    quality=self._mesh_opts.get("quality", True),
+                )
+            except Exception:
+                pass
+
+        
         # --- auto-regenerate mesh if a mesh existed or if we have remembered options ---
         if self._mesh_collection is not None or self._last_mesh_kwargs:
             from pdekit.mesh.generator import generate_mesh
@@ -1248,6 +1283,8 @@ class Canvas(QWidget):
         Triangulate the current domain (union of shapes) and show/update the mesh overlay.
         Remembers kwargs so we can auto-regenerate after domain operations.
         """
+        #self._mesh_opts["max_area"] = max_area
+        #self._mesh_opts["quality"] = quality
         # union the current result shapes into a single (Multi)Polygon
         geoms = [self._patch_to_geom(p) for p in self.shapes]
         domain = unary_union([g for g in geoms if not g.is_empty])
@@ -1255,23 +1292,48 @@ class Canvas(QWidget):
         mesh = generate_mesh(domain, max_area=max_area, quality=quality, quiet=True)
         self.show_mesh(mesh)
             
-    # def generate_and_show_mesh(self, **kwargs):
-       
-    #     geom = self._current_domain_geom()
-    #     if geom.is_empty:
-    #         QMessageBox.information(self, "Generate Mesh", "No geometry to mesh.")
-    #         return
+    def _clear_mesh_layer(self):
+        """Remove current mesh artists from the axes and forget the overlay."""
+        for art in self._mesh_artists:
+            try:
+                art.remove()
+            except Exception:
+                pass
+        self._mesh_artists.clear()
 
-    #     # Remember last options used
-    #     self._last_mesh_kwargs = dict(kwargs) if kwargs else {}
+    def _repaint_mesh_layer(self, alpha=0.35):
+        """
+        Re-add the mesh overlay after a redraw (axes was cleared). Requires
+        self._mesh_cache to be set. Draws a single LineCollection for speed.
+        """
+        self._clear_mesh_layer()
+        if not self._mesh_cache:
+            return
 
-    #     try:
-    #         mesh = generate_mesh(geom, **self._last_mesh_kwargs)
-    #     except Exception as e:
-    #         QMessageBox.critical(self, "Generate Mesh", f"Meshing failed:\n{e}")
-    #         return
+        P = self._mesh_cache.get("points")
+        T = self._mesh_cache.get("triangles")
+        if P is None or T is None or len(P) == 0 or len(T) == 0:
+            return
 
-    #     self.show_mesh(mesh)   # your existing overlay drawer (keeps it faint & persistent)
+        # Build edge segments for each triangle (closed loop per tri)
+        segments = []
+        for tri in np.asarray(T, dtype=int):
+            i, j, k = tri
+            segments.append([(P[i, 0], P[i, 1]), (P[j, 0], P[j, 1])])
+            segments.append([(P[j, 0], P[j, 1]), (P[k, 0], P[k, 1])])
+            segments.append([(P[k, 0], P[k, 1]), (P[i, 0], P[i, 1])])
+
+        lc = LineCollection(
+            segments,
+            linewidths=0.8,
+            alpha=alpha,
+            colors="orange",
+            zorder=5,
+            clip_on=True,
+        )
+        self.ax.add_collection(lc)
+        self._mesh_artists.append(lc)
+
 
 
     

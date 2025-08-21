@@ -169,6 +169,10 @@ class TriMesh:
                          (float(V[k,0]), float(V[k,1])),
                          (float(V[i,0]), float(V[i,1]))])
         return tris
+    
+    @property
+    def points(self):
+        return self.vertices
 
 
 def _ring_to_vertices_and_segments(ring: LinearRing,
@@ -277,7 +281,7 @@ def generate_mesh(geom: Polygon | MultiPolygon,
     return TriMesh(
         vertices=np.asarray(V, dtype=np.float64),
         triangles=np.asarray(T, dtype=np.int32),
-        segments=None if S is None else np.asarray(S, dtype=np.int32),
+        #segments=None if S is None else np.asarray(S, dtype=np.int32),
     )
 
 
