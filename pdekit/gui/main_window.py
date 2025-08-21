@@ -7,7 +7,8 @@ from matplotlib.patches import Polygon as MplPolygon, Ellipse as MplEllipse, Rec
 
 from pdekit.canvas.canvas import Canvas
 from pdekit.shapes.dialogs import EllipseDialog, RectangleDialog
-from pdekit.mesh.generator import generate_mesh, refine_mesh
+
+from PyQt6.QtWidgets import QMessageBox
 
 
 class MainWindow(QMainWindow):
@@ -108,7 +109,38 @@ class MainWindow(QMainWindow):
             self.canvas.domain_calculator()
 
     def on_generate_mesh(self):
-        generate_mesh()
+        """
+        Generate a mesh for the current domain and show it on the canvas.
+        Uses Canvas.generate_and_show_mesh(), which keeps the mesh layer pinned
+        (semi-transparent) so it stays visible while editing geometry.
+        """
+        # Read settings (fallbacks if you haven't set them on the window)
+        max_area = getattr(self, "mesh_max_area", None)   # e.g. 0.01 for finer mesh
+        quality  = getattr(self, "mesh_quality", True)    # Triangle quality switch
+
+        try:
+            mesh = self.canvas.generate_and_show_mesh(max_area=max_area, quality=quality)
+            # Optionally keep a reference to the latest mesh
+            self._last_mesh = mesh
+            # Optional: tell the user some stats (uncomment if you like)
+            # QMessageBox.information(self, "Mesh generated",
+            #     f"Nodes: {len(mesh.points)}\nTriangles: {len(mesh.triangles)}")
+        except ModuleNotFoundError as e:
+            # Typically if the 'triangle' package isn't installed
+            QMessageBox.critical(
+                self, "Generate Mesh",
+                "The meshing backend is missing.\n\n"
+                "Install the Triangle Python wrapper:\n"
+                "    pip install triangle\n\n"
+                f"Details: {e}"
+            )
+        except ValueError as e:
+            # Likely no valid domain on the canvas or geometry is empty
+            QMessageBox.warning(self, "Generate Mesh", str(e))
+        except Exception as e:
+            # Catch-all to avoid crashing the app
+            QMessageBox.critical(self, "Generate Mesh", f"Failed to generate mesh:\n{e}")
+
 
     def on_refine_mesh(self):
         refine_mesh()
