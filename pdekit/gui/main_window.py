@@ -7,6 +7,7 @@ from matplotlib.patches import Polygon as MplPolygon, Ellipse as MplEllipse, Rec
 
 from pdekit.canvas.canvas import Canvas
 from pdekit.shapes.dialogs import EllipseDialog, RectangleDialog
+from pdekit.mesh.dialogs import MeshRefineDialog
 
 from PyQt6.QtWidgets import QMessageBox
 
@@ -36,12 +37,15 @@ class MainWindow(QMainWindow):
         mesh_menu = QMenu(self)
         mesh_menu.setFont(font)
         
+        
         # start canvas, generate mesh, refine mesh: mesh (parent) --> child
         canvas_act = QAction("Start Canvas", self)
         gen_act    = QAction("Generate Mesh", self)
         ref_act    = QAction("Refine Mesh", self)
         delete_act = QAction("Delete", self)
         domain_act = QAction("Domain", self)
+        ref_act = QAction("Refine Mesh", self)
+        ref_act.setStatusTip("Adjust meshing parameters and re-mesh the current domain")
         mesh_menu.addAction(canvas_act)
         mesh_menu.addAction(gen_act)
         mesh_menu.addAction(ref_act)
@@ -114,12 +118,10 @@ class MainWindow(QMainWindow):
         Uses Canvas.generate_and_show_mesh(), which keeps the mesh layer pinned
         (semi-transparent) so it stays visible while editing geometry.
         """
-        # Read settings (fallbacks if you haven't set them on the window)
-        max_area = getattr(self, "mesh_max_area", None)   # e.g. 0.01 for finer mesh
-        quality  = getattr(self, "mesh_quality", True)    # Triangle quality switch
+
 
         try:
-            mesh = self.canvas.generate_and_show_mesh(max_area=max_area, quality=quality)
+            mesh = self.canvas.generate_and_show_mesh()
             # Optionally keep a reference to the latest mesh
             self._last_mesh = mesh
             # Optional: tell the user some stats (uncomment if you like)
@@ -143,4 +145,21 @@ class MainWindow(QMainWindow):
 
 
     def on_refine_mesh(self):
-        refine_mesh()
+    
+        # Ensure there is a domain to mesh
+        if not self.canvas.shapes:
+            QMessageBox.information(self, "Refine Mesh", "Draw or compute a domain first.")
+            return
+
+        defaults = self.canvas.get_mesh_params()  # last used values (or empty)
+
+        dlg = MeshRefineDialog(self, defaults=defaults)
+        if dlg.exec():  # Accepted
+            params = dlg.values()
+            # remember for next time & re-mesh now
+            self.canvas.set_mesh_params(**params)
+            #self.canvas._set_mesh_for_patch(patch, mesh, params=params)
+            try:
+                self.canvas.generate_and_show_mesh()
+            except Exception as e:
+                QMessageBox.warning(self, "Refine Mesh", f"Failed to generate mesh:\n{e}")

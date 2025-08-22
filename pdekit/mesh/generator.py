@@ -236,53 +236,79 @@ def _geom_to_pslg(geom: Polygon | MultiPolygon) -> dict:
     return A
 
 
-def generate_mesh(geom: Polygon | MultiPolygon,
+def generate_mesh(geom,
                   max_area: float | None = None,
+                  quiet: bool = True,
+                  min_angle: float = 25.0,
                   quality: bool = True,
-                  quiet: bool = True) -> TriMesh:
-    """
-    Triangulate a shapely (Multi)Polygon using Shewchuk's Triangle.
+                  conforming_delaunay: bool = True,
+                  max_steiner: int | None = None,
+                  smooth_iters: int = 0) -> TriMesh:
 
-    Parameters
-    ----------
-    geom : Polygon | MultiPolygon
-        Domain to mesh (holes supported).
-    max_area : float | None
-        If given, Triangle switch 'a' is used to limit triangle area.
-    quality : bool
-        If True, apply Triangle 'q' quality refinement.
-    quiet : bool
-        If True, pass 'Q' to silence Triangle.
-
-    Returns
-    -------
-    TriMesh
-        vertices (N,2) and triangles (M,3).
-    """
     A = _geom_to_pslg(geom)
 
-    opts = "p"          # use PSLG (segments respected)
+    opts = "p"                   # PSLG
     if quality:
-        opts += "q"
+        # include numeric min angle, Triangle uses 'qXX'
+        opts += f"q{float(min_angle):.6g}"
     if max_area is not None:
-        opts += f"a{max_area}"
+        opts += f"a{float(max_area):.6g}"
+    if conforming_delaunay:
+        opts += "D"
     if quiet:
         opts += "Q"
+    # NOTE: Triangle doesn’t have a “max steiner” count directly; you can ignore or
+    #       use it to clamp smoothing, or just keep it for future logic.
 
     result = triangle.triangulate(A, opts)
 
-    V = result.get("vertices", None)
-    T = result.get("triangles", None)
-    S = result.get("segments", None)
+    V = result.get("vertices")
+    T = result.get("triangles")
 
     if V is None or T is None:
         raise RuntimeError("Triangle failed to return vertices/triangles.")
 
-    return TriMesh(
+    mesh = TriMesh(
         vertices=np.asarray(V, dtype=np.float64),
         triangles=np.asarray(T, dtype=np.int32),
-        #segments=None if S is None else np.asarray(S, dtype=np.int32),
     )
+
+    if smooth_iters and len(mesh.vertices) and len(mesh.triangles):
+        mesh = _laplacian_smooth(mesh, iters=int(smooth_iters))
+
+    return mesh
+
+
+# -------- optional helper (only smoothing) --------
+def _laplacian_smooth(mesh: TriMesh, iters: int = 1) -> TriMesh:
+    V = mesh.vertices.copy()
+    T = mesh.triangles
+
+    # build adjacency and detect boundary vertices
+    from collections import Counter
+    edges = []
+    for a, b, c in T:
+        edges.extend([(a, b), (b, c), (c, a)])
+    edges = [tuple(sorted(e)) for e in edges]
+    counts = Counter(edges)
+    boundary = set([i for e, c in counts.items() if c == 1 for i in e])
+
+    nbrs = [[] for _ in range(len(V))]
+    for a, b, c in T:
+        nbrs[a] += [b, c]
+        nbrs[b] += [a, c]
+        nbrs[c] += [a, b]
+    nbrs = [list(set(ns)) for ns in nbrs]
+
+    for _ in range(iters):
+        newV = V.copy()
+        for i, ns in enumerate(nbrs):
+            if i in boundary or not ns:
+                continue
+            newV[i] = V[ns].mean(axis=0)
+        V = newV
+    return TriMesh(vertices=V, triangles=T)
+
 
 
 __all__ = ["TriMesh", "generate_mesh"]

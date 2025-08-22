@@ -86,6 +86,17 @@ class Canvas(QWidget):
         self._mesh_opts = {"quality": True, "max_area": None}  # last used meshing opts
         self._auto_remesh = True            # remesh automatically on geometry changes if a mesh exists
 
+        self._mesh_data = {}     # id(patch) -> {"V": np.ndarray, "T": np.ndarray}
+        #self._mesh_params = {}   # id(patch) -> dict of params used last time
+        self._mesh_params = {
+            "max_area": None,
+            "quiet": True,
+            "min_angle": 25.0,
+            "quality": True,
+            "conforming_delaunay": True,
+            "max_steiner": None,
+            "smooth_iters": 0,
+        }
         
         # Event connections
         self.canvas.mpl_connect('button_press_event', self.on_click)
@@ -701,7 +712,7 @@ class Canvas(QWidget):
         
 
 
-        # === ADDED: update tag for the moved/modified shape
+        # update tag for the moved/modified shape
         self._update_tag_position_for_patch(patch)
         self.redraw_shapes()
 
@@ -714,7 +725,7 @@ class Canvas(QWidget):
                                   width=abs(2*(x1 - x0)), 
                                   height=abs(2*(y1 - y0)))
             self.shapes.append(ellipse)
-            # === ADDED: auto-tag
+            
             self._auto_tag(ellipse)
 
             for art in self.current_artists:
@@ -734,7 +745,6 @@ class Canvas(QWidget):
             x1, y1 = event.xdata, event.ydata
             rect = MplRectangle((min(x0, x1), min(y0, y1)), abs(x1 - x0), abs(y1 - y0))
             self.shapes.append(rect)
-            # === ADDED: auto-tag
             self._auto_tag(rect)
             
             for art in self.current_artists:
@@ -761,10 +771,11 @@ class Canvas(QWidget):
         # (move/modify operations end on release). We reuse last used opts.
         if getattr(self, "_auto_remesh", True) and self._mesh_cache is not None:
             try:
-                self.generate_and_show_mesh(
-                    max_area=self._mesh_opts.get("max_area"),
-                    quality=self._mesh_opts.get("quality", True),
-                )
+                # self.generate_and_show_mesh(
+                #     max_area=self._mesh_opts.get("max_area"),
+                #     quality=self._mesh_opts.get("quality", True),
+                # )
+                self.generate_and_show_mesh()
             except Exception:
                 # Keep UI responsive even if meshing fails
                 pass
@@ -1176,10 +1187,7 @@ class Canvas(QWidget):
         # Auto-remesh after boolean ops if we already had a mesh layer
         if getattr(self, "_auto_remesh", True) and self._mesh_cache is not None:
             try:
-                self.generate_and_show_mesh(
-                    max_area=self._mesh_opts.get("max_area"),
-                    quality=self._mesh_opts.get("quality", True),
-                )
+                self.generate_and_show_mesh()
             except Exception:
                 pass
 
@@ -1278,19 +1286,45 @@ class Canvas(QWidget):
             return geoms[0].buffer(0)
         
 
-    def generate_and_show_mesh(self, max_area=None, quality=True):
-        """
-        Triangulate the current domain (union of shapes) and show/update the mesh overlay.
-        Remembers kwargs so we can auto-regenerate after domain operations.
-        """
-        #self._mesh_opts["max_area"] = max_area
-        #self._mesh_opts["quality"] = quality
-        # union the current result shapes into a single (Multi)Polygon
-        geoms = [self._patch_to_geom(p) for p in self.shapes]
-        domain = unary_union([g for g in geoms if not g.is_empty])
+    # def generate_and_show_mesh(self, max_area=None, quality=True):
+    #     """
+    #     Triangulate the current domain (union of shapes) and show/update the mesh overlay.
+    #     Remembers kwargs so we can auto-regenerate after domain operations.
+    #     """
+    #     #self._mesh_opts["max_area"] = max_area
+    #     #self._mesh_opts["quality"] = quality
+    #     # union the current result shapes into a single (Multi)Polygon
+    #     geoms = [self._patch_to_geom(p) for p in self.shapes]
+    #     domain = unary_union([g for g in geoms if not g.is_empty])
 
-        mesh = generate_mesh(domain, max_area=max_area, quality=quality, quiet=True)
+    #     mesh = generate_mesh(domain, max_area=max_area, quality=quality, quiet=True)
+    #     self.show_mesh(mesh)
+        
+    #def generate_and_show_mesh(self, **mesh_kwargs):
+    def generate_and_show_mesh(self):
+        """
+        Re-mesh current domain and overlay results.
+        Accepts: max_area, quality, min_angle, conforming_delaunay, max_steiner, smooth_iters, quiet
+        """
+        geom = self._current_domain_geom()  # however you compute it; must return (Multi)Polygon
+        if geom is None or geom.is_empty:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Mesh", "No domain to mesh.")
+            return
+
+        #mesh = generate_mesh(geom, **mesh_kwargs)
+        mesh = generate_mesh(geom, **self._mesh_params)
+
+        # remember last params so Refine dialog can prefill
+        #self._last_mesh_params = dict(mesh_kwargs)
+        self._last_mesh_params = self._mesh_params
+
+        # store and draw overlay
+        self._mesh = mesh
+        self._mesh_geom_tag = self.get_shape_tags()[:]  # or however you link mesh ↔ shape(s)
+
         self.show_mesh(mesh)
+
             
     def _clear_mesh_layer(self):
         """Remove current mesh artists from the axes and forget the overlay."""
@@ -1334,6 +1368,13 @@ class Canvas(QWidget):
         self.ax.add_collection(lc)
         self._mesh_artists.append(lc)
 
+    # store and reuse last-used meshing params
+    def get_mesh_params(self) -> dict:
+        return getattr(self, "_mesh_params", {}) or {}
 
+    def set_mesh_params(self, **kwargs):
+        mp = getattr(self, "_mesh_params", {}).copy()
+        mp.update({k: v for k, v in kwargs.items() if v is not None})
+        self._mesh_params = mp
 
     
