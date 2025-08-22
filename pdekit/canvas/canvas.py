@@ -9,16 +9,21 @@ from matplotlib.backends.backend_qtagg import (
     NavigationToolbar2QT as NavigationToolbar
 )
 from matplotlib.patches import Polygon as MplPolygon, Ellipse as MplEllipse, Rectangle as MplRectangle, PathPatch
-from matplotlib.path import Path  # === ADDED
-from matplotlib import patheffects as pe 
+from matplotlib.path import Path
+from matplotlib import patheffects as pe
+from matplotlib.collections import LineCollection
 
 from shapely.geometry import Polygon as ShapelyPoly, Point as ShapelyPoint, box as shapely_box, MultiPolygon
+from shapely.geometry import GeometryCollection
+from shapely.ops import unary_union
 from shapely import affinity as shapely_aff
+from pdekit.mesh.generator import generate_mesh
 
-from pdekit.shapes.dialogs import EllipseDialog, RectangleDialog, DomainCalculatorDialog
+from pdekit.shapes.dialogs import EllipseDialog, RectangleDialog, DomainCalculatorDialog           
 from math import hypot, atan2, cos, sin
 import numpy as np
-import re  # === ADDED
+import re
+
 
 
 class Canvas(QWidget):
@@ -50,17 +55,48 @@ class Canvas(QWidget):
         self.circle_center = None
         self.rect_start = None
         
+        # meshing
+        
+        # mesh overlay + last-used options
+        self._mesh_collection = None         # LineCollection overlay (already used by show_mesh)
+        self._last_mesh_kwargs = None        # remembers options used to generate mesh
+        
+        self._mesh = None                       # last mesh data you drew
+        self._mesh_collection = None            # LineCollection overlay
+        self._mesh_color = (0.98, 0.67, 0.16)   # warm orange
+        self._mesh_alpha_active = 0.75          # normal visibility
+        self._mesh_alpha_edit = 0.30            # faded while editing/dragging
+        self._mesh_lw = 0.9
+            
         # store geometry
         self.shapes = []
         self.current_points = []
         self.current_artists = []
 
-        # === ADDED: tagging state
+        # tagging state
         self._tag_counter = 1
         self._shape_tags = {}    # id(patch) -> tag
         self._tag_to_shape = {}  # tag -> patch
         self._tag_text = {}      # tag -> Text artist
         self._shape_geom = {}  # id(patch) -> Shapely geometry (Polygon)
+        
+        # Mesh overlay state 
+        self._mesh_artists = []             # list of artists used to draw the mesh
+        self._mesh_cache = None             # {"points": ndarray, "triangles": ndarray}
+        self._mesh_opts = {"quality": True, "max_area": None}  # last used meshing opts
+        self._auto_remesh = True            # remesh automatically on geometry changes if a mesh exists
+
+        self._mesh_data = {}     # id(patch) -> {"V": np.ndarray, "T": np.ndarray}
+        #self._mesh_params = {}   # id(patch) -> dict of params used last time
+        self._mesh_params = {
+            "max_area": None,
+            "quiet": True,
+            "min_angle": 25.0,
+            "quality": True,
+            "conforming_delaunay": True,
+            "max_steiner": None,
+            "smooth_iters": 0,
+        }
         
         # Event connections
         self.canvas.mpl_connect('button_press_event', self.on_click)
@@ -135,6 +171,9 @@ class Canvas(QWidget):
         self._tag_to_shape.clear()
         self._tag_counter = 1
 
+        self._clear_mesh_layer()
+        self._mesh_cache = None
+        
         self.canvas.draw()
         
     def delete_selected(self):
@@ -155,6 +194,11 @@ class Canvas(QWidget):
             self._shape_geom.pop(id(patch), None)
 
             self.selected_idx = None
+            
+            # delete the existing mesh overlay --> geometry changed
+            self._clear_mesh_layer()
+            self._mesh_cache = None
+
             self.redraw_shapes()
             
     def _highlight(self, idx):
@@ -288,7 +332,22 @@ class Canvas(QWidget):
                 except Exception:
                     pass
 
+        # keep the mesh overlay visible across redraws
+        if self._mesh_collection is not None:
+            # fade while editing/moving for better geometry visibility
+            editing = bool(self.mode) or bool(self.dragging)
+            self._mesh_collection.set_alpha(
+                self._mesh_alpha_edit if editing else self._mesh_alpha_active
+            )
+            try:
+                self.ax.add_collection(self._mesh_collection)
+            except Exception:
+                # if Matplotlib still thinks it's attached elsewhere
+                try: self._mesh_collection.remove()
+                except Exception: pass
+                self.ax.add_collection(self._mesh_collection)
 
+        self._repaint_mesh_layer(alpha=0.35)
         self.canvas.draw()
 
     def on_click(self, event):
@@ -637,6 +696,9 @@ class Canvas(QWidget):
                             patch.set_antialiased(True)
                         except Exception:
                             pass
+            
+            if isinstance(patch, PathPatch):
+                self._translate_mesh_overlay(dx, dy)
                         
         elif self.mode == 'modify_poly':
             pts = patch.get_xy()
@@ -650,7 +712,7 @@ class Canvas(QWidget):
         
 
 
-        # === ADDED: update tag for the moved/modified shape
+        # update tag for the moved/modified shape
         self._update_tag_position_for_patch(patch)
         self.redraw_shapes()
 
@@ -663,7 +725,7 @@ class Canvas(QWidget):
                                   width=abs(2*(x1 - x0)), 
                                   height=abs(2*(y1 - y0)))
             self.shapes.append(ellipse)
-            # === ADDED: auto-tag
+            
             self._auto_tag(ellipse)
 
             for art in self.current_artists:
@@ -683,7 +745,6 @@ class Canvas(QWidget):
             x1, y1 = event.xdata, event.ydata
             rect = MplRectangle((min(x0, x1), min(y0, y1)), abs(x1 - x0), abs(y1 - y0))
             self.shapes.append(rect)
-            # === ADDED: auto-tag
             self._auto_tag(rect)
             
             for art in self.current_artists:
@@ -705,6 +766,20 @@ class Canvas(QWidget):
             self.modify_vidx = None
             self.modify_corner = None
             self.last_mouse = None
+            
+        # Auto-remesh if a mesh exists and the geometry may have changed
+        # (move/modify operations end on release). We reuse last used opts.
+        if getattr(self, "_auto_remesh", True) and self._mesh_cache is not None:
+            try:
+                # self.generate_and_show_mesh(
+                #     max_area=self._mesh_opts.get("max_area"),
+                #     quality=self._mesh_opts.get("quality", True),
+                # )
+                self.generate_and_show_mesh()
+            except Exception:
+                # Keep UI responsive even if meshing fails
+                pass
+
         
     def zoom_callback(self, event):
         
@@ -726,11 +801,39 @@ class Canvas(QWidget):
         for tag, patch in list(self._tag_to_shape.items()):
             self._place_tag_text(tag, patch)
 
-    def show_mesh(self, mesh):
-        for elem in mesh.elements:
-            xs, ys = zip(*elem)
-            self.ax.plot(xs, ys, '-k')
-        self.draw()
+
+    def show_mesh(self, mesh, faint=True):
+        """
+        Cache and draw a mesh overlay that survives redraws.
+        'mesh' is expected to have .points (N,2) and .triangles (M,3).
+        """
+        # Cache
+        self._mesh_cache = {
+            "points": np.asarray(mesh.points, dtype=float),
+            "triangles": np.asarray(mesh.triangles, dtype=int),
+        }
+        # Paint (semi-transparent by default)
+        self._repaint_mesh_layer(alpha=0.35 if faint else 0.9)
+        self.canvas.draw_idle()
+
+
+    # def show_mesh(self, mesh, *, color=None, lw=None):
+    #     """Display/replace the mesh overlay and keep it across redraws."""
+    #     # detach old overlay if any
+    #     if self._mesh_collection is not None:
+    #         try: self._mesh_collection.remove()
+    #         except Exception: pass
+    #         self._mesh_collection = None
+
+    #     self._mesh = mesh
+    #     if color is not None: self._mesh_color = color
+    #     if lw    is not None: self._mesh_lw    = lw
+
+    #     self._mesh_collection = self._mesh_to_collection(mesh)
+    #     # add now; redraw_shapes() will re-add after every cla()
+    #     self.ax.add_collection(self._mesh_collection)
+    #     self.canvas.draw_idle()
+
 
 # TAGGING UTILS
     def _auto_tag(self, patch):
@@ -1080,3 +1183,198 @@ class Canvas(QWidget):
 
         self._tag_counter += 1  # advance counter so next auto tag is fresh
         self.redraw_shapes()
+        
+        # Auto-remesh after boolean ops if we already had a mesh layer
+        if getattr(self, "_auto_remesh", True) and self._mesh_cache is not None:
+            try:
+                self.generate_and_show_mesh()
+            except Exception:
+                pass
+
+        
+        # --- auto-regenerate mesh if a mesh existed or if we have remembered options ---
+        if self._mesh_collection is not None or self._last_mesh_kwargs:
+            from pdekit.mesh.generator import generate_mesh
+            try:
+                # we already have `geom` here from the calculator; clean and reuse it
+                new_geom = geom.buffer(0)
+                mesh = generate_mesh(new_geom, **(self._last_mesh_kwargs or {}))
+                self.show_mesh(mesh)  # updates the faint overlay in-place
+            except Exception as e:
+                # Don't block geometry update; just notify about mesh failure
+                QMessageBox.warning(self, "Remesh", f"Remeshing failed:\n{e}")
+
+
+    
+    ###############
+    ### MESHING ###
+    ###############
+    
+    def _mesh_to_collection(self, mesh, *, color=None, alpha=None, lw=None, z=9):
+        """Convert your mesh into a LineCollection (edges only)."""
+        color = color if color is not None else self._mesh_color
+        alpha = alpha if alpha is not None else self._mesh_alpha_active
+        lw    = lw    if lw    is not None else self._mesh_lw
+
+        segments = []
+        for tri in mesh.elements:
+            pts = list(tri)
+            # handle triangles passed as 3 pts or closed (4 with last==first)
+            if len(pts) == 4 and pts[0] == pts[-1]:
+                pts = pts[:-1]
+            if len(pts) >= 3:
+                segments.append([pts[0], pts[1]])
+                segments.append([pts[1], pts[2]])
+                segments.append([pts[2], pts[0]])
+
+        lc = LineCollection(
+            segments,
+            linewidths=lw,
+            colors=[color],
+            alpha=alpha,
+            zorder=z,
+            clip_on=True,
+        )
+        return lc
+
+    def _translate_mesh_overlay(self, dx: float, dy: float):
+        """Translate the mesh LineCollection in data coordinates."""
+        if self._mesh_collection is None:
+            return
+        segs = self._mesh_collection.get_segments()
+        if not segs:
+            return
+        off = np.array([dx, dy], dtype=float)
+        segs2 = [s + off for s in segs]   # each s is (2,2)
+        self._mesh_collection.set_segments(segs2)
+
+    
+    def get_polygons_for_meshing(self):
+        """Return a list of Shapely Polygons that represent the current domain(s)."""
+        polys = []
+        for patch in self.shapes:
+            g = self._shape_geom.get(id(patch)) or self._patch_to_geom(patch)
+            if g is None or g.is_empty:
+                continue
+            if isinstance(g, ShapelyPoly):
+                polys.append(g)
+            elif hasattr(g, "geoms"):
+                for gg in g.geoms:
+                    if isinstance(gg, ShapelyPoly):
+                        polys.append(gg)
+        return polys
+    
+    
+    def _current_domain_geom(self):
+        """
+        Union all current shape geometries into one Shapely geometry suitable for meshing.
+        Uses the exact stored geometry for PathPatch results when available.
+        """
+        geoms = []
+        for p in self.shapes:
+            g = self._shape_geom.get(id(p), self._patch_to_geom(p))
+            if not g.is_empty:
+                geoms.append(g)
+        if not geoms:
+            return GeometryCollection()
+        
+        try:
+            u = unary_union(geoms)
+            # clean tiny slivers/self-touching rings, avoids GEOS TopologyException
+            return u.buffer(0)
+        except Exception:
+            return geoms[0].buffer(0)
+        
+
+    # def generate_and_show_mesh(self, max_area=None, quality=True):
+    #     """
+    #     Triangulate the current domain (union of shapes) and show/update the mesh overlay.
+    #     Remembers kwargs so we can auto-regenerate after domain operations.
+    #     """
+    #     #self._mesh_opts["max_area"] = max_area
+    #     #self._mesh_opts["quality"] = quality
+    #     # union the current result shapes into a single (Multi)Polygon
+    #     geoms = [self._patch_to_geom(p) for p in self.shapes]
+    #     domain = unary_union([g for g in geoms if not g.is_empty])
+
+    #     mesh = generate_mesh(domain, max_area=max_area, quality=quality, quiet=True)
+    #     self.show_mesh(mesh)
+        
+    #def generate_and_show_mesh(self, **mesh_kwargs):
+    def generate_and_show_mesh(self):
+        """
+        Re-mesh current domain and overlay results.
+        Accepts: max_area, quality, min_angle, conforming_delaunay, max_steiner, smooth_iters, quiet
+        """
+        geom = self._current_domain_geom()  # however you compute it; must return (Multi)Polygon
+        if geom is None or geom.is_empty:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Mesh", "No domain to mesh.")
+            return
+
+        #mesh = generate_mesh(geom, **mesh_kwargs)
+        mesh = generate_mesh(geom, **self._mesh_params)
+
+        # remember last params so Refine dialog can prefill
+        #self._last_mesh_params = dict(mesh_kwargs)
+        self._last_mesh_params = self._mesh_params
+
+        # store and draw overlay
+        self._mesh = mesh
+        self._mesh_geom_tag = self.get_shape_tags()[:]  # or however you link mesh ↔ shape(s)
+
+        self.show_mesh(mesh)
+
+            
+    def _clear_mesh_layer(self):
+        """Remove current mesh artists from the axes and forget the overlay."""
+        for art in self._mesh_artists:
+            try:
+                art.remove()
+            except Exception:
+                pass
+        self._mesh_artists.clear()
+
+    def _repaint_mesh_layer(self, alpha=0.35):
+        """
+        Re-add the mesh overlay after a redraw (axes was cleared). Requires
+        self._mesh_cache to be set. Draws a single LineCollection for speed.
+        """
+        self._clear_mesh_layer()
+        if not self._mesh_cache:
+            return
+
+        P = self._mesh_cache.get("points")
+        T = self._mesh_cache.get("triangles")
+        if P is None or T is None or len(P) == 0 or len(T) == 0:
+            return
+
+        # Build edge segments for each triangle (closed loop per tri)
+        segments = []
+        for tri in np.asarray(T, dtype=int):
+            i, j, k = tri
+            segments.append([(P[i, 0], P[i, 1]), (P[j, 0], P[j, 1])])
+            segments.append([(P[j, 0], P[j, 1]), (P[k, 0], P[k, 1])])
+            segments.append([(P[k, 0], P[k, 1]), (P[i, 0], P[i, 1])])
+
+        lc = LineCollection(
+            segments,
+            linewidths=0.8,
+            alpha=alpha,
+            colors="orange",
+            zorder=5,
+            clip_on=True,
+        )
+        self.ax.add_collection(lc)
+        self._mesh_artists.append(lc)
+
+    # store and reuse last-used meshing params
+    def get_mesh_params(self) -> dict:
+        return getattr(self, "_mesh_params", {}) or {}
+
+    def set_mesh_params(self, **kwargs):
+        mp = getattr(self, "_mesh_params", {}).copy()
+        mp.update({k: v for k, v in kwargs.items() if v is not None})
+        self._mesh_params = mp
+
+    
