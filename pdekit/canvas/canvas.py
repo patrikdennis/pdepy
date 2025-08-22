@@ -363,7 +363,7 @@ class Canvas(QWidget):
         if not self.shapes and (x is None or y is None):
             return
         
-        # ── double-click to edit ellipse or rectangle ──
+        # double-click to edit ellipse or rectangle
         if getattr(event, 'dblclick', False) and not self.drawing and event.button == 1:
                 
             for idx, patch in enumerate(self.shapes):
@@ -381,7 +381,7 @@ class Canvas(QWidget):
                                 patch.center = (h, k)
                                 patch.width  = 2 * a
                                 patch.height = 2 * b
-                                # === ADDED: tag position update
+                                # tag position update
                                 self._update_tag_position_for_patch(patch)
                                 self.redraw_shapes()
                             except Exception as e:
@@ -403,7 +403,7 @@ class Canvas(QWidget):
                                 patch.set_y(min(y1, y2))
                                 patch.set_width(abs(x2 - x1))
                                 patch.set_height(abs(y2 - y1))
-                                # === ADDED: tag position update
+                                # tag position update
                                 self._update_tag_position_for_patch(patch)
                                 self.redraw_shapes()
                             except Exception as e:
@@ -412,14 +412,14 @@ class Canvas(QWidget):
 
         # Polygon drawing
         if self.drawing and self.draw_type == 'polygon' and event.button == 1:
-            #if len(self.current_points) >= 3 and hypot(x - self.current_points[0][0], y - self.current_points[0][1]) <= self.CLOSE_THRESHOLD:
+
             if len(self.current_points) >= 3 and self._is_close_pixel(self.current_points[0][0], self.current_points[0][1], event):
                 # close polygon
                 self.current_points.append(self.current_points[0])
                 self.draw_current()
                 poly = MplPolygon(self.current_points, closed=True)
                 self.shapes.append(poly)
-                # === ADDED: auto-tag
+                # auto-tag
                 self._auto_tag(poly)
                 self.current_points.clear()
                 self.drawing = False
@@ -450,11 +450,9 @@ class Canvas(QWidget):
                 hit = False
                 if isinstance(patch, MplPolygon):
                     verts = patch.get_xy()[:-1]
-                    #dists = [hypot(px - x, py - y) for px, py in verts]
                     # pixel distance
                     pixel_dists = [self._pixel_dist(px, py, event) for px, py in verts]
                     
-                    #if min(dists) <= self.CLOSE_THRESHOLD:
                     if min(pixel_dists) < self.CLOSE_PIXEL_THRESHOLD:
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
                             self.toolbar.pan()
@@ -469,7 +467,7 @@ class Canvas(QWidget):
                     if ShapelyPoly(patch.get_xy()).contains(ShapelyPoint(x, y)):
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
                             self.toolbar.pan()
-                        #self.selected_idx = idx
+
                         self.mode = 'move'
                         self.dragging = True
                         hit = True
@@ -491,7 +489,6 @@ class Canvas(QWidget):
                             self.toolbar.pan()
                             
                         # modify ellipse boundary
-                        #self.selected_idx = idx
                         self.mode = 'modify_ellipse'
                         self.dragging = True
                         return
@@ -500,12 +497,10 @@ class Canvas(QWidget):
                     if rx and ry and ((x - xc)/rx)**2 + ((y - yc)/ry)**2 <= 1:
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
                             self.toolbar.pan()
-                        #self.selected_idx = idx
                         self.mode = 'move'
                         self.dragging = True
                         hit = True
                         self.last_mouse = (xpix, ypix)
-                        #return
                     
                 # rectangle editing
                 if isinstance(patch, MplRectangle):
@@ -534,12 +529,11 @@ class Canvas(QWidget):
                         if getattr(self.toolbar, 'mode', '') == 'pan/zoom':
                             self.toolbar.pan()
                             
-                        #self.selected_idx = idx
                         self.mode = 'move'
                         self.dragging = True
                         hit = True
                         self.last_mouse = (xpix, ypix)
-                        #return
+
                 # PathPatch (result of domain ops) - move by dragging inside
                 if isinstance(patch, PathPatch):
                     geom = self._shape_geom.get(id(patch), self._patch_to_geom(patch))
@@ -610,11 +604,10 @@ class Canvas(QWidget):
         if self.mode == 'modify_ellipse' and self.selected_idx is not None:
             
             patch = self.shapes[self.selected_idx]
-            #xc, yc = patch.center
-            
             xpix, ypix = event.x, event.y
             inv = self.ax.transData.inverted()
             xdata, ydata = inv.transform((xpix, ypix))
+            
             # original center
             xc, yc = patch.center
 
@@ -623,7 +616,8 @@ class Canvas(QWidget):
             ry = abs(ydata - yc)
             patch.width = 2 * rx
             patch.height = 2 * ry
-            # === ADDED: tag position update
+            
+            # tag position update
             self._update_tag_position_for_patch(patch)
             self.redraw_shapes()
             return
@@ -638,6 +632,7 @@ class Canvas(QWidget):
             
             # fixed opposite corner in data coords
             ox, oy = self.opp_corner
+            
             # compute new origin and size (flips automatically)
             new_x = min(nx, ox)
             new_y = min(ny, oy)
@@ -647,9 +642,11 @@ class Canvas(QWidget):
             patch.set_y(new_y)
             patch.set_width(w)
             patch.set_height(h)
+            
             # tag position update
             self._update_tag_position_for_patch(patch)
             self.redraw_shapes()
+            
             # update last mouse position
             self.last_mouse = (event.x, event.y)
 
@@ -683,6 +680,7 @@ class Canvas(QWidget):
                 if not geom.is_empty:
                     geom2 = shapely_aff.translate(geom, xoff=dx, yoff=dy)
                     self._shape_geom[id(patch)] = geom2
+                    
                     # update the path to match new geometry
                     if isinstance(geom2, ShapelyPoly):
                         new_path = self._polygon_to_path(geom2)
@@ -710,8 +708,6 @@ class Canvas(QWidget):
                 pts[0] = pts[-1]
             patch.set_xy(pts)
         
-
-
         # update tag for the moved/modified shape
         self._update_tag_position_for_patch(patch)
         self.redraw_shapes()
@@ -768,13 +764,9 @@ class Canvas(QWidget):
             self.last_mouse = None
             
         # Auto-remesh if a mesh exists and the geometry may have changed
-        # (move/modify operations end on release). We reuse last used opts.
+        # (move/modify operations end on release). We reuse last used opts
         if getattr(self, "_auto_remesh", True) and self._mesh_cache is not None:
             try:
-                # self.generate_and_show_mesh(
-                #     max_area=self._mesh_opts.get("max_area"),
-                #     quality=self._mesh_opts.get("quality", True),
-                # )
                 self.generate_and_show_mesh()
             except Exception:
                 # Keep UI responsive even if meshing fails
@@ -816,26 +808,10 @@ class Canvas(QWidget):
         self._repaint_mesh_layer(alpha=0.35 if faint else 0.9)
         self.canvas.draw_idle()
 
+#################
+# TAGGING UTILS #
+#################
 
-    # def show_mesh(self, mesh, *, color=None, lw=None):
-    #     """Display/replace the mesh overlay and keep it across redraws."""
-    #     # detach old overlay if any
-    #     if self._mesh_collection is not None:
-    #         try: self._mesh_collection.remove()
-    #         except Exception: pass
-    #         self._mesh_collection = None
-
-    #     self._mesh = mesh
-    #     if color is not None: self._mesh_color = color
-    #     if lw    is not None: self._mesh_lw    = lw
-
-    #     self._mesh_collection = self._mesh_to_collection(mesh)
-    #     # add now; redraw_shapes() will re-add after every cla()
-    #     self.ax.add_collection(self._mesh_collection)
-    #     self.canvas.draw_idle()
-
-
-# TAGGING UTILS
     def _auto_tag(self, patch):
         tag = f"P{self._tag_counter}"
         self._tag_counter += 1
@@ -925,12 +901,12 @@ class Canvas(QWidget):
             return shapely_aff.scale(circ, rx, ry, origin=(xc, yc))
 
         elif isinstance(patch, PathPatch):
-            # --- NEW: rebuild rings from path codes; drop NaNs from CLOSEPOLY
+            # rebuild rings from path codes; drop NaNs from CLOSEPOLY
             path = patch.get_path()
             verts = path.vertices
             codes = path.codes
             if codes is None:
-                # defensive: if no codes, just ignore any non-finite rows
+                # if no codes, just ignore any non-finite rows
                 verts = verts[np.isfinite(verts).all(axis=1)]
                 if len(verts) >= 3:
                     try:
@@ -953,7 +929,7 @@ class Canvas(QWidget):
                     if np.isfinite(x) and np.isfinite(y):
                         ring.append((x, y))
                 elif c == Path.CLOSEPOLY:
-                    # CLOSEPOLY row may be (nan, nan) — just close current ring
+                    # CLOSEPOLY row may be (nan, nan) —-> just close current ring
                     if len(ring) >= 3:
                         if ring[0] != ring[-1]:
                             ring.append(ring[0])
@@ -1052,10 +1028,11 @@ class Canvas(QWidget):
 
 
 
-    # =================================
-    # ===   Domain Calculator  ===
-    # =================================
-    # hyphen is escaped; parentheses split to avoid "bad range" errors
+    #####################
+    # Domain Calculator #
+    #####################
+    
+    # hyphen is escaped --> parentheses split to avoid "bad range" errors
     _token_re = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*|[()]|[+\-*!&])\s*")
 
     def _tokenize(self, expr: str):
@@ -1192,7 +1169,7 @@ class Canvas(QWidget):
                 pass
 
         
-        # --- auto-regenerate mesh if a mesh existed or if we have remembered options ---
+        # auto-regenerate mesh if a mesh existed or if we have remembered options
         if self._mesh_collection is not None or self._last_mesh_kwargs:
             from pdekit.mesh.generator import generate_mesh
             try:
@@ -1280,48 +1257,31 @@ class Canvas(QWidget):
         
         try:
             u = unary_union(geoms)
-            # clean tiny slivers/self-touching rings, avoids GEOS TopologyException
+            # clean tiny slivers/self-touching rings --> avoids GEOS TopologyException
             return u.buffer(0)
         except Exception:
             return geoms[0].buffer(0)
         
 
-    # def generate_and_show_mesh(self, max_area=None, quality=True):
-    #     """
-    #     Triangulate the current domain (union of shapes) and show/update the mesh overlay.
-    #     Remembers kwargs so we can auto-regenerate after domain operations.
-    #     """
-    #     #self._mesh_opts["max_area"] = max_area
-    #     #self._mesh_opts["quality"] = quality
-    #     # union the current result shapes into a single (Multi)Polygon
-    #     geoms = [self._patch_to_geom(p) for p in self.shapes]
-    #     domain = unary_union([g for g in geoms if not g.is_empty])
-
-    #     mesh = generate_mesh(domain, max_area=max_area, quality=quality, quiet=True)
-    #     self.show_mesh(mesh)
-        
-    #def generate_and_show_mesh(self, **mesh_kwargs):
     def generate_and_show_mesh(self):
         """
         Re-mesh current domain and overlay results.
         Accepts: max_area, quality, min_angle, conforming_delaunay, max_steiner, smooth_iters, quiet
         """
-        geom = self._current_domain_geom()  # however you compute it; must return (Multi)Polygon
+        geom = self._current_domain_geom()  # however you compute it --> must return (Multi)Polygon
         if geom is None or geom.is_empty:
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Mesh", "No domain to mesh.")
             return
 
-        #mesh = generate_mesh(geom, **mesh_kwargs)
         mesh = generate_mesh(geom, **self._mesh_params)
 
         # remember last params so Refine dialog can prefill
-        #self._last_mesh_params = dict(mesh_kwargs)
         self._last_mesh_params = self._mesh_params
 
         # store and draw overlay
         self._mesh = mesh
-        self._mesh_geom_tag = self.get_shape_tags()[:]  # or however you link mesh ↔ shape(s)
+        self._mesh_geom_tag = self.get_shape_tags()[:]
 
         self.show_mesh(mesh)
 
