@@ -834,6 +834,7 @@ class Canvas(QWidget):
         y0, y1 = self.ax.get_ylim()
         view = shapely_box(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
+        ### THIS NEEDS TO GO!!!! INSANE ERROR HANDLING
         try:
             visible = geom.intersection(view)
         except Exception:
@@ -1025,8 +1026,6 @@ class Canvas(QWidget):
             return patches
 
         return patches
-
-
 
     #####################
     # Domain Calculator #

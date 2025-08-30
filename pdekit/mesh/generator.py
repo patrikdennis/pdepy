@@ -8,7 +8,7 @@ from shapely.geometry import Polygon, MultiPolygon, LinearRing
 from shapely.ops import unary_union
 
 try:
-    import triangle  # pip install triangle
+    import triangle
 except Exception as e:
     raise ImportError(
         "The 'triangle' package is required. Install with `pip install triangle`."
