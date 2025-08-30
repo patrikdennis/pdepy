@@ -36,15 +36,13 @@ class MainWindow(QMainWindow):
         mesh_btn.setFont(font)
         mesh_menu = QMenu(self)
         mesh_menu.setFont(font)
-        
-        
+
         # start canvas, generate mesh, refine mesh: mesh (parent) --> child
-        canvas_act = QAction("Start Canvas", self)
-        gen_act    = QAction("Generate Mesh", self)
-        ref_act    = QAction("Refine Mesh", self)
-        delete_act = QAction("Delete", self)
-        domain_act = QAction("Domain", self)
-        ref_act = QAction("Refine Mesh", self)
+        canvas_act      = QAction("Start Canvas", self)
+        gen_act         = QAction("Generate Mesh", self)
+        ref_act         = QAction("Refine Mesh", self)
+        delete_act      = QAction("Delete", self)
+        domain_act      = QAction("Domain", self)
         ref_act.setStatusTip("Adjust meshing parameters and re-mesh the current domain")
         mesh_menu.addAction(canvas_act)
         mesh_menu.addAction(gen_act)
@@ -63,6 +61,26 @@ class MainWindow(QMainWindow):
         mesh_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup) if hasattr(QToolButton, 'ToolButtonPopupMode') else mesh_btn.setPopupMode(QToolButton.ToolButtonPopup)
         toolbar.addWidget(mesh_btn)
 
+        condition_btn = QToolButton(self)
+        condition_btn.setText("Conditions")
+        condition_btn.setFont(font)
+        condition_menu = QMenu(self)
+        condition_menu.setFont(font)
+
+        condition_btn.setMenu(condition_menu)
+        condition_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup) if hasattr(QToolButton, 'ToolButtonPopupMode') else condition_btn.setPopupMode(QToolButton.ToolButtonPopup)
+        toolbar.addWidget(condition_btn)
+
+        boundary_condition_act = QAction("Boundary", self)
+        initial_condition_act = QAction("Initial", self)
+        condition_menu.addAction(boundary_condition_act)
+        condition_menu.addAction(initial_condition_act)
+
+        # navigation toolbar (parent) --> Delete and Domain (child)
+        toolbar.addAction(delete_act)
+        toolbar.addAction(domain_act)
+
+        # connect actions
         canvas_act.triggered.connect(self.on_generate_canvas)
         gen_act.triggered.connect(self.on_generate_mesh)
         ref_act.triggered.connect(self.on_refine_mesh)
@@ -71,9 +89,8 @@ class MainWindow(QMainWindow):
         rect_act.triggered.connect(self.on_draw_rectangle)
         delete_act.triggered.connect(self.on_delete)
         domain_act.triggered.connect(self.on_domain)
-    
-        toolbar.addAction(delete_act)
-        toolbar.addAction(domain_act)
+        boundary_condition_act.triggered.connect(self.on_boundary_condition)
+        initial_condition_act.triggered.connect(self.on_initial_condition)
         
         self.canvas = None
         
@@ -163,3 +180,11 @@ class MainWindow(QMainWindow):
                 self.canvas.generate_and_show_mesh()
             except Exception as e:
                 QMessageBox.warning(self, "Refine Mesh", f"Failed to generate mesh:\n{e}")
+
+    def on_boundary_condition(self):
+
+        QMessageBox.warning(self, "Boundary Conditions", "Not implemented yet")
+
+    def on_initial_condition(self):
+
+        QMessageBox.warning(self, "Initial Conditions", "Not implemented yet")
