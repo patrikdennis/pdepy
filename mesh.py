@@ -8,11 +8,11 @@ supporting polygons, circles, holes, and boolean subtraction.
 * **Dependencies** – ``numpy``, ``matplotlib``, and ``triangle`` (a Python
   wrapper around Jonathan Shewchuk's Triangle).
 
-Usage example
+ example
 -------------
->>> from mesh import Mesh
->>> # Outer square minus a circular hole
->>> domain = {
+from mesh import Mesh
+# Outer square minus a circular hole
+# domain = {
 ...     'outer': {'type': 'polygon', 'points': [(0,0),(2,0),(2,2),(0,2)]},
 ...     'holes': [
 ...         {'type': 'circle', 'center': (1,1), 'radius': 0.5, 'segments': 64}
