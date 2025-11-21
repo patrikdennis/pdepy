@@ -1,0 +1,18 @@
+services:
+  pdekit:
+    build: .
+    image: pdekit:latest
+    container_name: pdekit_app
+    # Pass the display environment variable to the container
+    environment:
+      - DISPLAY=${DISPLAY}
+      # - QT_DEBUG_PLUGINS=1  # Uncomment if you need to debug GUI issues
+    # Mount the X11 socket so the container can "see" your screen
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      # Mount code to enable local editing and run without rebuilding every time
+      - .:/app
+    # Share the host's network stack
+    network_mode: host
+    # Keep the terminal open if you want to see Python logs
+    tty: true
